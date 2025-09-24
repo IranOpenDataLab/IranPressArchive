@@ -73,16 +73,17 @@ class OldNewspaperProcessor(CategoryProcessor):
                 if os.path.exists(file_path):
                     continue
                 
-                # Download file
-                success = self.file_manager.download_file(url, file_path)
+                # Download file (convert string path to Path object)
+                from pathlib import Path
+                success, download_error = self.file_manager.download_file(url, Path(file_path))
                 
                 if success:
                     files_downloaded += 1
                 else:
                     files_failed += 1
-                    error_msg = f"Failed to download {url}"
-                    errors.append(error_msg)
-                    self.error_handler.log_error(error_msg, 'network')
+                    error_message = download_error or f"Failed to download {url}"
+                    errors.append(error_message)
+                    self.error_handler.log_error(error_message, 'network')
                     
             except Exception as e:
                 files_failed += 1
@@ -158,16 +159,17 @@ class NewspaperProcessor(CategoryProcessor):
                 if os.path.exists(file_path):
                     continue
                 
-                # Download file
-                success = self.file_manager.download_file(url, file_path)
+                # Download file (convert string path to Path object)
+                from pathlib import Path
+                success, download_error = self.file_manager.download_file(url, Path(file_path))
                 
                 if success:
                     files_downloaded += 1
                 else:
                     files_failed += 1
-                    error_msg = f"Failed to download {url}"
-                    errors.append(error_msg)
-                    self.error_handler.log_error(error_msg, 'network')
+                    error_message = download_error or f"Failed to download {url}"
+                    errors.append(error_message)
+                    self.error_handler.log_error(error_message, 'network')
                     
             except Exception as e:
                 files_failed += 1
