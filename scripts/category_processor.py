@@ -110,7 +110,17 @@ class OldNewspaperProcessor(CategoryProcessor):
     def create_directory_structure(self, archive: Dict[str, Any]) -> str:
         """Create static directory structure for old newspaper."""
         folder_name = archive.get('folder', 'unknown')
-        base_dir = os.path.join('old-newspaper', folder_name)
+        
+        # Check if this archive has newspaper name info from crawling
+        source_info = archive.get('source_info', {})
+        newspaper_name = source_info.get('newspaper_name')
+        
+        if newspaper_name:
+            # Use newspaper name as folder name
+            base_dir = os.path.join('old-newspaper', folder_name)
+        else:
+            # Use original folder name
+            base_dir = os.path.join('old-newspaper', folder_name)
         
         # Create directory if it doesn't exist
         os.makedirs(base_dir, exist_ok=True)

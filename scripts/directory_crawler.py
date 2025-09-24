@@ -358,62 +358,101 @@ class DirectoryCrawler:
         
         return False
     
-    def generate_urls_config(self, crawl_result: CrawlResult, archive_info: Dict[str, str]) -> Dict[str, any]:
+    def generate_urls_config(self, crawl_result: CrawlResult, archive_info: Dict[str, str]) -> List[Dict[str, any]]:
         """
-        Generate URLs configuration from crawl results.
+        Generate URLs configuration from crawl results, grouped by newspaper.
         
         Args:
             crawl_result: Result from directory crawling
             archive_info: Archive metadata (title, folder, category, etc.)
             
         Returns:
-            Dictionary in urls.yml format
+            List of dictionaries in urls.yml format, one per newspaper
         """
-        # Group files by year if possible
-        files_by_year = {}
+        # Group files by newspaper name and year
+        newspapers = {}
         ungrouped_files = []
         
         for file_url in crawl_result.discovered_files:
+            newspaper_name = self._extract_newspaper_name_from_url(file_url)
             year = self._extract_year_from_url(file_url)
-            if year:
-                if year not in files_by_year:
-                    files_by_year[year] = []
-                files_by_year[year].append(file_url)
+            
+            if newspaper_name:
+                if newspaper_name not in newspapers:
+                    newspapers[newspaper_name] = {}
+                
+                year_key = str(year) if year else "unknown"
+                if year_key not in newspapers[newspaper_name]:
+                    newspapers[newspaper_name][year_key] = []
+                
+                newspapers[newspaper_name][year_key].append(file_url)
             else:
                 ungrouped_files.append(file_url)
         
-        # Create years dictionary
-        years_dict = {}
+        # Create archive configurations for each newspaper
+        archive_configs = []
         
-        # Add grouped files
-        for year, files in sorted(files_by_year.items()):
-            years_dict[str(year)] = files
-        
-        # Add ungrouped files to a default year or current year
-        if ungrouped_files:
-            default_year = str(max(files_by_year.keys())) if files_by_year else "2024"
-            if default_year not in years_dict:
-                years_dict[default_year] = []
-            years_dict[default_year].extend(ungrouped_files)
-        
-        # Create archive configuration
-        archive_config = {
-            'title_fa': archive_info.get('title_fa', 'آرشیو کراول شده'),
-            'title_en': archive_info.get('title_en', 'Crawled Archive'),
-            'folder': archive_info.get('folder', 'crawled-archive'),
-            'category': archive_info.get('category', 'newspaper'),
-            'description': archive_info.get('description', f'Archive crawled from {crawl_result.base_url}'),
-            'years': years_dict,
-            'crawl_info': {
-                'base_url': crawl_result.base_url,
-                'crawl_date': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'total_files': crawl_result.total_files,
-                'crawl_depth': crawl_result.crawl_depth,
-                'processing_time': crawl_result.processing_time
+        for newspaper_name, years_data in newspapers.items():
+            # Create folder name from newspaper name
+            folder_name = self._sanitize_folder_name(newspaper_name)
+            
+            archive_config = {
+                'title_fa': f'آرشیو {newspaper_name}',
+                'title_en': f'{newspaper_name} Archive',
+                'folder': folder_name,
+                'category': archive_info.get('category', 'old-newspaper'),
+                'description': f'آرشیو نشریه {newspaper_name} - دانلود از {crawl_result.base_url}',
+                'years': years_data,
+                'source_info': {
+                    'base_url': crawl_result.base_url,
+                    'crawl_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'newspaper_name': newspaper_name,
+                    'total_files': sum(len(files) for files in years_data.values())
+                }
             }
-        }
+            archive_configs.append(archive_config)
         
-        return archive_config
+        # Handle ungrouped files if any
+        if ungrouped_files:
+            # Group ungrouped files by year
+            ungrouped_by_year = {}
+            for file_url in ungrouped_files:
+                year = self._extract_year_from_url(file_url)
+                year_key = str(year) if year else "unknown"
+                if year_key not in ungrouped_by_year:
+                    ungrouped_by_year[year_key] = []
+                ungrouped_by_year[year_key].append(file_url)
+            
+            # Create a general archive for ungrouped files
+            archive_config = {
+                'title_fa': archive_info.get('title_fa', 'آرشیو کراول شده'),
+                'title_en': archive_info.get('title_en', 'Crawled Archive'),
+                'folder': archive_info.get('folder', 'crawled-archive'),
+                'category': archive_info.get('category', 'old-newspaper'),
+                'description': f'فایل‌های متفرقه - دانلود از {crawl_result.base_url}',
+                'years': ungrouped_by_year,
+                'source_info': {
+                    'base_url': crawl_result.base_url,
+                    'crawl_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'total_files': len(ungrouped_files)
+                }
+            }
+            archive_configs.append(archive_config)
+        
+        return archive_configs
+    
+    def _sanitize_folder_name(self, name: str) -> str:
+        """Sanitize newspaper name for use as folder name."""
+        # Remove or replace problematic characters
+        sanitized = re.sub(r'[^\w\u0600-\u06FF\-_]', '-', name)
+        sanitized = re.sub(r'-+', '-', sanitized)  # Replace multiple dashes with single
+        sanitized = sanitized.strip('-_')
+        
+        # Ensure it's not empty
+        if not sanitized:
+            sanitized = 'unknown-newspaper'
+        
+        return sanitized
     
     def _extract_year_from_url(self, url: str) -> Optional[int]:
         """Extract year from URL path."""
@@ -430,6 +469,37 @@ class DirectoryCrawler:
             year = int(gregorian_year_match.group())
             if 1900 <= year <= 2100:
                 return year
+        
+        return None
+    
+    def _extract_newspaper_name_from_url(self, url: str) -> Optional[str]:
+        """Extract newspaper name from URL path."""
+        parsed = urlparse(url)
+        path_parts = [part for part in parsed.path.split('/') if part]
+        
+        # Common newspaper name patterns
+        newspaper_patterns = [
+            # Persian newspaper names
+            r'(نشاط|توس|جامعه|عصر.*آزادگان|کیهان|اطلاعات|جمهوری.*اسلامی|ایران|همشهری|شرق)',
+            # English newspaper names  
+            r'(neshat|tous|jameh|asr.*azadegan|keyhan|ettelaat|jomhouri|iran|hamshahri|shargh)',
+            # General patterns like "newspaper-name-year"
+            r'([a-zA-Z\u0600-\u06FF]+)-\d{4}',
+            # Directory names that look like newspapers
+            r'([a-zA-Z\u0600-\u06FF]{3,})'
+        ]
+        
+        for part in path_parts:
+            for pattern in newspaper_patterns:
+                match = re.search(pattern, part, re.IGNORECASE)
+                if match:
+                    # Extract the newspaper name (first group if exists, otherwise full match)
+                    name = match.group(1) if match.groups() else match.group(0)
+                    # Clean up the name
+                    name = re.sub(r'-\d{4}$', '', name)  # Remove year suffix
+                    name = name.strip('-_')
+                    if len(name) >= 3:  # Minimum length for newspaper name
+                        return name
         
         return None
 

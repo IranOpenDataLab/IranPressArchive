@@ -247,6 +247,7 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
         
         years_section = self._generate_years_section(archive)
         error_section = self._generate_error_section(errors, 'fa')
+        source_section = self._generate_source_section(archive)
         
         content = f"""{persian_toggle}
 
@@ -259,6 +260,8 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
 {years_section}
 
 {error_section}
+
+{source_section}
 
 ---
 *تولید شده به صورت خودکار توسط سیستم آرشیو ایران / Generated automatically by Iranian Archive Workflow*
@@ -275,6 +278,7 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
         
         years_section = self._generate_years_section(archive)
         error_section = self._generate_error_section(errors, 'en')
+        source_section = self._generate_source_section(archive)
         
         content = f"""{english_toggle}
 
@@ -287,6 +291,8 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
 {years_section}
 
 {error_section}
+
+{source_section}
 
 ---
 *Generated automatically by Iranian Archive Workflow*
@@ -344,3 +350,34 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
 ---
 *Generated automatically by Iranian Archive Workflow*
 """
+    
+    def _generate_source_section(self, archive: Dict[str, Any]) -> str:
+        """Generate source information section for publication README."""
+        source_info = archive.get('source_info', {})
+        crawl_info = archive.get('crawl_info', {})
+        
+        # Check if this archive has source information
+        if not source_info and not crawl_info:
+            return ""
+        
+        base_url = source_info.get('base_url') or crawl_info.get('base_url')
+        crawl_date = source_info.get('crawl_date') or crawl_info.get('crawl_date')
+        newspaper_name = source_info.get('newspaper_name')
+        
+        if not base_url:
+            return ""
+        
+        # Generate bilingual source section
+        content = "\n## منبع / Source\n\n"
+        
+        if newspaper_name:
+            content += f"**نام نشریه / Publication Name:** {newspaper_name}\n\n"
+        
+        content += f"**منبع دانلود / Download Source:** [{base_url}]({base_url})\n\n"
+        
+        if crawl_date:
+            content += f"**تاریخ کراول / Crawl Date:** {crawl_date}\n\n"
+        
+        content += "**روش دانلود / Download Method:** خودکار از طریق سیستم کراول / Automatic via crawling system\n"
+        
+        return content

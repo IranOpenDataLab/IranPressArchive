@@ -1,10 +1,14 @@
 archives:
-  - title_fa: "آرشیو سایت جلائی‌پور"
-    title_en: "Jalaeipour Archive"
-    folder: "jalaeipour-complete"
+  - title_fa: "آرشیو نشریه نشاط"
+    title_en: "Neshat Archive"
+    folder: "neshat"
     category: "old-newspaper"
-    description: " نشریات موجود در سایت جلائی‌پور شامل توس، جامعه، نشاط و عصر آزادگان"
+    description: "آرشیو نشریه نشاط - دانلود از سایت جلائی‌پور"
     years:
       "1400":
         - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-        - "https://www.africau.edu/images/default/sample.pdf"
+    source_info:
+      base_url: "https://dl.jalaeipour.com/neshat/"
+      crawl_date: "2025-09-24 23:30:00"
+      newspaper_name: "نشاط"
+      total_files: 1

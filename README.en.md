@@ -6,9 +6,9 @@ This repository contains a collection of Iranian public documents including news
 
 ## Archive Contents
 
-### Jalaeipour Complete
+### Neshat
 
-Available years: [1400](old-newspaper/jalaeipour-complete/1400)
+Available years: [1400](old-newspaper/neshat/1400)
 
 ## About This Project
 
