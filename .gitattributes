@@ -1,0 +1,59 @@
+# Git attributes for Iranian Archive Workflow
+
+# Text files
+*.md text eol=lf
+*.txt text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.sh text eol=lf
+
+# Binary files - never track these
+*.pdf binary
+*.doc binary
+*.docx binary
+*.xls binary
+*.xlsx binary
+*.ppt binary
+*.pptx binary
+*.zip binary
+*.rar binary
+*.7z binary
+*.tar.gz binary
+
+# Archive directories - exclude from git entirely
+newspaper/ export-ignore
+old-newspaper/ export-ignore
+archives/ export-ignore
+downloads/ export-ignore
+data/ export-ignore
+content/ export-ignore
+
+# Performance and monitoring data - exclude from git
+performance_data/ export-ignore
+*.log export-ignore
+workflow_performance_*.json export-ignore
+workflow_debug_*.json export-ignore
+debug_info_*.json export-ignore
+
+# Test outputs - exclude from git
+test_output/ export-ignore
+test_results/ export-ignore
+test_data/ export-ignore
+
+# Temporary files - exclude from git
+temp/ export-ignore
+tmp/ export-ignore
+*.tmp export-ignore
+*.temp export-ignore
+
+# IDE and system files
+.vscode/ export-ignore
+.idea/ export-ignore
+.DS_Store export-ignore
+Thumbs.db export-ignore

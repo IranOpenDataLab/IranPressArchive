@@ -1,0 +1,302 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+workflow.log
+error_*.log
+
+# Test outputs
+.coverage
+.pytest_cache/
+.tox/
+htmlcov/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Performance and monitoring data
+performance_data/
+performance_*.json
+performance_*.txt
+performance_charts_*.png
+workflow_performance_*.json
+workflow_debug_*.json
+workflow_summary_*.md
+debug_info_*.json
+demo_performance_report_*.txt
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+.tmp/
+
+# Downloaded files (archive content) - Never commit these
+newspaper/
+old-newspaper/
+archives/
+downloads/
+data/
+content/
+
+# PDF and document files - Never commit these
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+
+# Large media files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.mkv
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
+*.wma
+
+# Image files (if any large ones)
+*.tiff
+*.tif
+*.bmp
+*.raw
+*.cr2
+*.nef
+*.orf
+*.sr2
+
+# Configuration backups
+urls.yml.bak
+urls_*.yml
+config_backup_*.yml
+demo_config_*.yml
+
+# Error reports
+error_report_*.json
+crash_report_*.json
+
+# Kiro IDE files
+.kiro/
+TASK_*.md
+*_IMPLEMENTATION_SUMMARY.md
+
+# Development and testing files
+test_jalaeipour_crawler.py
+jalaeipour_urls.yml
+*_urls.yml
+demo_config_*.yml
+test_config_*.yml
+crawl_test_*.yml
+
+# Crawler output files
+discovered_urls.txt
+crawl_results_*.json
+url_analysis_*.json
+
+# Site-specific test files
+test_*_crawler.py
+*_crawler_test.py
+
+# Generated configuration files
+generated_*.yml
+auto_generated_*.yml
+crawled_*.yml
+
+# Cleanup guide and temporary docs
+CLEANUP_GUIDE.md
+
+# Documentation - exclude all docs from repository
+docs/
+
+# Test data and mock files
+test_data/
+mock_data/
+test_*.yml
+test_*.json
+test_output/
+test_results/
+
+# Specific test and development files
+scripts/test_jalaeipour_crawler.py
+scripts/test_directory_crawler.py
+scripts/demo_optimization_features.py
+scripts/cleanup_downloads.py
+
+# BeautifulSoup cache (if any)
+.bs4_cache/
+.crawler_cache/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Large files
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+
+# Node.js (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Secrets
+secrets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Cache
+.cache/
+*.cache
+
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution
+*.egg-info/
+dist/
+build/
+
+# Documentation build
+docs/_build/
+docs/build/
+
+# Profiling
+*.prof
+*.profile
+
+# Memory dumps
+*.dmp
+*.dump
+
+# Core dumps
+core.*
+
+# System files
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Windows
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
