@@ -34,7 +34,7 @@ archives:
     description: "آرشیو نشریه توس - تست GitHub Actions"
     years:
       "1403":
-        - "https://file-examples.com/storage/fe68c1b7c66fa7d2367c8c8/2017/10/file_example_PDF_500_kB.pdf"
+        - "https://www.orimi.com/pdf-test.pdf"
     source_info:
       base_url: "https://example.com/tous/"
       crawl_date: "2025-09-25 00:05:00"
