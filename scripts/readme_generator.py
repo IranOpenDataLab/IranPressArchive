@@ -247,6 +247,7 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
         
         years_section = self._generate_years_section(archive)
         error_section = self._generate_error_section(errors, 'fa')
+        wikipedia_section = self._generate_wikipedia_section(archive)
         source_section = self._generate_source_section(archive)
         
         content = f"""{persian_toggle}
@@ -254,6 +255,8 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
 # {title_fa} / {title_en}
 
 {description}
+
+{wikipedia_section}
 
 ## شماره‌های موجود / Available Issues
 
@@ -278,6 +281,7 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
         
         years_section = self._generate_years_section(archive)
         error_section = self._generate_error_section(errors, 'en')
+        wikipedia_section = self._generate_wikipedia_section(archive)
         source_section = self._generate_source_section(archive)
         
         content = f"""{english_toggle}
@@ -285,6 +289,8 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
 # {title}
 
 {description}
+
+{wikipedia_section}
 
 ## Available Issues
 
@@ -381,3 +387,37 @@ This archive is automatically updated using GitHub Actions. The goal of this pro
         content += "**روش دانلود / Download Method:** خودکار از طریق سیستم کراول / Automatic via crawling system\n"
         
         return content
+    
+    def _generate_wikipedia_section(self, archive: Dict[str, Any]) -> str:
+        """Generate Wikipedia information section for publication README."""
+        source_info = archive.get('source_info', {})
+        newspaper_name = source_info.get('newspaper_name')
+        
+        if not newspaper_name:
+            # Try to extract from title
+            title_fa = archive.get('title_fa', '')
+            if 'آرشیو' in title_fa:
+                newspaper_name = title_fa.replace('آرشیو', '').strip()
+        
+        if not newspaper_name:
+            return ""
+        
+        try:
+            # Import here to avoid circular imports
+            import sys
+            import os
+            sys.path.append(os.path.dirname(__file__))
+            from wikipedia_fetcher import WikipediaFetcher
+            
+            fetcher = WikipediaFetcher()
+            wiki_info = fetcher.get_newspaper_info(newspaper_name)
+            
+            if wiki_info:
+                return fetcher.format_wikipedia_info_for_readme(wiki_info, 'fa')
+            
+        except Exception as e:
+            # Log error but don't fail README generation
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to fetch Wikipedia info for {newspaper_name}: {e}")
+        
+        return ""

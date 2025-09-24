@@ -7,6 +7,8 @@ archives:
     years:
       "1400":
         - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+      "1401":
+        - "https://www.learningcontainer.com/wp-content/uploads/2019/09/sample-pdf-file.pdf"
     source_info:
       base_url: "https://dl.jalaeipour.com/neshat/"
       crawl_date: "2025-09-24 23:30:00"
