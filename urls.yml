@@ -1,0 +1,9 @@
+archives:
+  - title_fa: "آرشیو سایت جلائی‌پور"
+    title_en: "Jalaeipour Archive"
+    folder: "jalaeipour-complete"
+    category: "newspaper"
+    description: " نشریات موجود در سایت جلائی‌پور شامل توس، جامعه، نشاط و عصر آزادگان"
+    years:
+      "1400":
+        - "https://dl.jalaeipour.com"
