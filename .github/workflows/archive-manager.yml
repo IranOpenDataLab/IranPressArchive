@@ -27,6 +27,11 @@ on:
         required: false
         default: false
         type: boolean
+      dry_run:
+        description: 'Run in dry-run mode (no actual downloads)'
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Daily at 2 AM UTC for newspaper updates
     - cron: '0 2 * * *'
@@ -76,6 +81,7 @@ jobs:
             echo "enable_monitoring=${{ github.event.inputs.enable_monitoring || 'true' }}" >> $GITHUB_OUTPUT
             echo "enable_debugging=${{ github.event.inputs.enable_debugging || 'false' }}" >> $GITHUB_OUTPUT
             echo "benchmark_mode=${{ github.event.inputs.benchmark_mode || 'false' }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Run archive manager with monitoring
@@ -99,7 +105,13 @@ jobs:
             CMD="$CMD --benchmark"
           fi
           
+          # Add verbose flag
           CMD="$CMD --verbose"
+          
+          # Add dry-run flag if requested
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
           
           echo "Executing: $CMD"
           $CMD
