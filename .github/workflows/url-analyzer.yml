@@ -47,8 +47,7 @@ jobs:
         run: |
           echo "🔍 Starting URL analysis and structure detection..."
           
-          # Create analysis script
-          cat > analyze_urls.py << 'EOF'
+          python -c "
           import yaml
           import json
           import requests
@@ -59,7 +58,6 @@ jobs:
           from pathlib import Path
           
           def analyze_url_structure(url):
-              """Analyze URL structure and detect if it's a directory or direct file."""
               try:
                   response = requests.head(url, timeout=10, allow_redirects=True)
                   content_type = response.headers.get('content-type', '').lower()
@@ -69,7 +67,6 @@ jobs:
                   elif 'html' in content_type:
                       return 'directory', None
                   else:
-                      # Try GET request to check content
                       response = requests.get(url, timeout=10, stream=True)
                       content_type = response.headers.get('content-type', '').lower()
                       
@@ -79,17 +76,15 @@ jobs:
                           return 'directory', None
                           
               except Exception as e:
-                  print(f"Error analyzing {url}: {e}")
+                  print(f'Error analyzing {url}: {e}')
                   return 'unknown', None
           
           def extract_newspaper_name_from_url(url):
-              """Extract newspaper name from URL path."""
               import re
               
               parsed = urlparse(url)
               path_parts = [part for part in parsed.path.split('/') if part]
               
-              # Persian newspaper names
               persian_names = {
                   'neshat': 'نشاط',
                   'tous': 'توس', 
@@ -107,7 +102,6 @@ jobs:
                       if eng_name in part_lower or persian_name in part:
                           return persian_name, eng_name
                   
-                  # Check for newspaper patterns
                   if re.search(r'(neshat|tous|jameh|kayhan)', part_lower):
                       match = re.search(r'(neshat|tous|jameh|kayhan)', part_lower)
                       eng_name = match.group(1)
@@ -115,119 +109,106 @@ jobs:
               
               return None, None
           
-          def main():
-              # Load URLs configuration
-              with open('urls.yml', 'r', encoding='utf-8') as f:
-                  config = yaml.safe_load(f)
+          # Load URLs configuration
+          with open('urls.yml', 'r', encoding='utf-8') as f:
+              config = yaml.safe_load(f)
+          
+          analysis_results = {
+              'analysis_date': datetime.now().isoformat(),
+              'newspapers': {},
+              'summary': {
+                  'total_archives': 0,
+                  'total_files': 0,
+                  'direct_files': 0,
+                  'directories': 0,
+                  'unknown': 0
+              }
+          }
+          
+          for archive in config.get('archives', []):
+              archive_name = archive.get('folder', 'unknown')
+              newspaper_fa = archive.get('source_info', {}).get('newspaper_name', '')
               
-              analysis_results = {
-                  'analysis_date': datetime.now().isoformat(),
-                  'newspapers': {},
-                  'summary': {
-                      'total_archives': 0,
-                      'total_files': 0,
-                      'direct_files': 0,
-                      'directories': 0,
-                      'unknown': 0
-                  }
+              if not newspaper_fa:
+                  title_fa = archive.get('title_fa', '')
+                  if 'آرشیو' in title_fa:
+                      newspaper_fa = title_fa.replace('آرشیو', '').replace('نشریه', '').strip()
+              
+              newspaper_info = {
+                  'title_fa': archive.get('title_fa', ''),
+                  'title_en': archive.get('title_en', ''),
+                  'folder': archive_name,
+                  'category': archive.get('category', 'old-newspaper'),
+                  'description': archive.get('description', ''),
+                  'newspaper_name': newspaper_fa,
+                  'files': [],
+                  'total_files': 0,
+                  'years': {}
               }
               
-              for archive in config.get('archives', []):
-                  archive_name = archive.get('folder', 'unknown')
-                  newspaper_fa = archive.get('source_info', {}).get('newspaper_name', '')
+              for year, urls in archive.get('years', {}).items():
+                  year_files = []
                   
-                  if not newspaper_fa:
-                      # Try to extract from title
-                      title_fa = archive.get('title_fa', '')
-                      if 'آرشیو' in title_fa:
-                          newspaper_fa = title_fa.replace('آرشیو', '').replace('نشریه', '').strip()
-                  
-                  newspaper_info = {
-                      'title_fa': archive.get('title_fa', ''),
-                      'title_en': archive.get('title_en', ''),
-                      'folder': archive_name,
-                      'category': archive.get('category', 'old-newspaper'),
-                      'description': archive.get('description', ''),
-                      'newspaper_name': newspaper_fa,
-                      'files': [],
-                      'total_files': 0,
-                      'years': {}
-                  }
-                  
-                  # Analyze each URL
-                  for year, urls in archive.get('years', {}).items():
-                      year_files = []
+                  for url in urls:
+                      print(f'Analyzing: {url}')
+                      url_type, size = analyze_url_structure(url)
                       
-                      for url in urls:
-                          print(f"Analyzing: {url}")
-                          url_type, size = analyze_url_structure(url)
-                          
-                          # Extract newspaper name from URL if not available
-                          if not newspaper_fa:
-                              persian_name, eng_name = extract_newspaper_name_from_url(url)
-                              if persian_name:
-                                  newspaper_info['newspaper_name'] = persian_name
-                                  if not newspaper_info['title_fa']:
-                                      newspaper_info['title_fa'] = f'آرشیو نشریه {persian_name}'
-                                  if not newspaper_info['title_en']:
-                                      newspaper_info['title_en'] = f'{eng_name.title()} Archive'
-                          
-                          file_info = {
-                              'url': url,
-                              'type': url_type,
-                              'size': size,
-                              'year': year,
-                              'filename': f"{archive_name}_{len(year_files)+1:03d}.pdf"
-                          }
-                          
-                          year_files.append(file_info)
-                          newspaper_info['files'].append(file_info)
-                          
-                          # Update summary
-                          analysis_results['summary']['total_files'] += 1
-                          if url_type == 'direct_file':
-                              analysis_results['summary']['direct_files'] += 1
-                          elif url_type == 'directory':
-                              analysis_results['summary']['directories'] += 1
-                          else:
-                              analysis_results['summary']['unknown'] += 1
+                      if not newspaper_fa:
+                          persian_name, eng_name = extract_newspaper_name_from_url(url)
+                          if persian_name:
+                              newspaper_info['newspaper_name'] = persian_name
+                              if not newspaper_info['title_fa']:
+                                  newspaper_info['title_fa'] = f'آرشیو نشریه {persian_name}'
+                              if not newspaper_info['title_en']:
+                                  newspaper_info['title_en'] = f'{eng_name.title()} Archive'
                       
-                      newspaper_info['years'][year] = year_files
+                      file_info = {
+                          'url': url,
+                          'type': url_type,
+                          'size': size,
+                          'year': year,
+                          'filename': f'{archive_name}_{len(year_files)+1:03d}.pdf'
+                      }
+                      
+                      year_files.append(file_info)
+                      newspaper_info['files'].append(file_info)
+                      
+                      analysis_results['summary']['total_files'] += 1
+                      if url_type == 'direct_file':
+                          analysis_results['summary']['direct_files'] += 1
+                      elif url_type == 'directory':
+                          analysis_results['summary']['directories'] += 1
+                      else:
+                          analysis_results['summary']['unknown'] += 1
                   
-                  newspaper_info['total_files'] = len(newspaper_info['files'])
-                  analysis_results['newspapers'][archive_name] = newspaper_info
-                  analysis_results['summary']['total_archives'] += 1
+                  newspaper_info['years'][year] = year_files
               
-              # Save analysis results
-              analysis_file = f"url_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-              with open(analysis_file, 'w', encoding='utf-8') as f:
-                  json.dump(analysis_results, f, ensure_ascii=False, indent=2)
-              
-              print(f"Analysis complete! Results saved to {analysis_file}")
-              print(f"Total newspapers: {analysis_results['summary']['total_archives']}")
-              print(f"Total files: {analysis_results['summary']['total_files']}")
-              print(f"Direct files: {analysis_results['summary']['direct_files']}")
-              print(f"Directories: {analysis_results['summary']['directories']}")
-              
-              # Set outputs for next workflow
-              print(f"::set-output name=analysis-file::{analysis_file}")
-              print(f"::set-output name=total-newspapers::{analysis_results['summary']['total_archives']}")
-              print(f"::set-output name=total-files::{analysis_results['summary']['total_files']}")
-              
-              return analysis_file
+              newspaper_info['total_files'] = len(newspaper_info['files'])
+              analysis_results['newspapers'][archive_name] = newspaper_info
+              analysis_results['summary']['total_archives'] += 1
           
-          if __name__ == '__main__':
-              main()
-          EOF
+          # Save analysis results
+          analysis_file = f'url_analysis_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.json'
+          with open(analysis_file, 'w', encoding='utf-8') as f:
+              json.dump(analysis_results, f, ensure_ascii=False, indent=2)
           
-          # Run analysis
-          python analyze_urls.py
+          print(f'Analysis complete! Results saved to {analysis_file}')
+          print(f'Total newspapers: {analysis_results[\"summary\"][\"total_archives\"]}')
+          print(f'Total files: {analysis_results[\"summary\"][\"total_files\"]}')
+          print(f'Direct files: {analysis_results[\"summary\"][\"direct_files\"]}')
+          
+          # Set outputs for next workflow
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'analysis-file={analysis_file}\\n')
+              f.write(f'total-newspapers={analysis_results[\"summary\"][\"total_archives\"]}\\n')
+              f.write(f'total-files={analysis_results[\"summary\"][\"total_files\"]}\\n')
+          "
 
       - name: Generate README structure
         run: |
           echo "📝 Generating README structure for each newspaper..."
           
-          cat > generate_readme_structure.py << 'EOF'
+          python -c "
           import json
           import os
           from pathlib import Path
@@ -235,7 +216,7 @@ jobs:
           # Find the latest analysis file
           analysis_files = [f for f in os.listdir('.') if f.startswith('url_analysis_')]
           if not analysis_files:
-              print("No analysis file found!")
+              print('No analysis file found!')
               exit(1)
           
           latest_analysis = sorted(analysis_files)[-1]
@@ -245,53 +226,54 @@ jobs:
           
           # Create directory structure and README templates
           for newspaper_name, info in analysis['newspapers'].items():
-              newspaper_dir = Path(f"old-newspaper/{newspaper_name}")
+              newspaper_dir = Path(f'old-newspaper/{newspaper_name}')
               newspaper_dir.mkdir(parents=True, exist_ok=True)
               
               # Generate README content
-              readme_content = f"""[🇺🇸 English](README.en.md) | 🇮🇷 فارسی
-
-# {info['title_fa']} / {info['title_en']}
-
-{info['description']}
-
-## شماره‌های موجود / Available Issues
-
-"""
+              readme_lines = [
+                  '[🇺🇸 English](README.en.md) | 🇮🇷 فارسی',
+                  '',
+                  f'# {info[\"title_fa\"]} / {info[\"title_en\"]}',
+                  '',
+                  info['description'],
+                  '',
+                  '## شماره‌های موجود / Available Issues',
+                  ''
+              ]
               
               # Add years and file counts
               for year, files in info['years'].items():
-                  readme_content += f"- **{year}**: {len(files)} issues ([View folder]({year}/))\n"
+                  readme_lines.append(f'- **{year}**: {len(files)} issues ([View folder]({year}/))')
               
-              readme_content += f"""
-
-## آمار / Statistics
-
-- **تعداد کل فایل‌ها / Total Files**: {info['total_files']}
-- **سال‌های موجود / Available Years**: {', '.join(info['years'].keys())}
-
-## منبع / Source
-
-**نام نشریه / Publication Name:** {info['newspaper_name']}
-
-**روش دانلود / Download Method:** خودکار از طریق سیستم آرشیو / Automatic via archive system
-
----
-*تولید شده به صورت خودکار توسط سیستم آرشیو ایران / Generated automatically by Iranian Archive Workflow*
-*آخرین بروزرسانی / Last Updated: {analysis['analysis_date']}*
-"""
+              readme_lines.extend([
+                  '',
+                  '## آمار / Statistics',
+                  '',
+                  f'- **تعداد کل فایل‌ها / Total Files**: {info[\"total_files\"]}',
+                  f'- **سال‌های موجود / Available Years**: {\", \".join(info[\"years\"].keys())}',
+                  '',
+                  '## منبع / Source',
+                  '',
+                  f'**نام نشریه / Publication Name:** {info[\"newspaper_name\"]}',
+                  '',
+                  '**روش دانلود / Download Method:** خودکار از طریق سیستم آرشیو / Automatic via archive system',
+                  '',
+                  '---',
+                  '*تولید شده به صورت خودکار توسط سیستم آرشیو ایران / Generated automatically by Iranian Archive Workflow*',
+                  f'*آخرین بروزرسانی / Last Updated: {analysis[\"analysis_date\"]}*'
+              ])
+              
+              readme_content = '\\n'.join(readme_lines)
               
               # Write README
-              readme_path = newspaper_dir / "README.md"
+              readme_path = newspaper_dir / 'README.md'
               with open(readme_path, 'w', encoding='utf-8') as f:
                   f.write(readme_content)
               
-              print(f"Generated README for {newspaper_name}")
+              print(f'Generated README for {newspaper_name}')
           
-          print("README structure generation complete!")
-          EOF
-          
-          python generate_readme_structure.py
+          print('README structure generation complete!')
+          "
 
       - name: Commit analysis results
         run: |
@@ -300,12 +282,14 @@ jobs:
           
           if [ -n "$(git status --porcelain)" ]; then
             git add .
+            ANALYSIS_COUNT=$(ls url_analysis_*.json | wc -l)
+            LATEST_ANALYSIS=$(ls url_analysis_*.json | tail -1)
             git commit -m "feat: URL analysis and structure detection
 
-- Analyzed $(ls url_analysis_*.json | wc -l) URL configurations
+- Analyzed $ANALYSIS_COUNT URL configurations
 - Generated README structure for newspapers
 - Detected file types and directory structures
-- Created analysis report: $(ls url_analysis_*.json | tail -1)"
+- Created analysis report: $LATEST_ANALYSIS"
             git push
           else
             echo "No changes to commit"

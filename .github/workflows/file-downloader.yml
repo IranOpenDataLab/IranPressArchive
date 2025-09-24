@@ -57,20 +57,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyyaml requests beautifulsoup4 urllib3 tqdm
 
-      - name: Download latest analysis file
+      - name: Create analysis from urls.yml
         run: |
-          echo "📥 Looking for latest URL analysis file..."
+          echo "📥 Creating analysis from urls.yml..."
           
-          # Find the latest analysis file
-          ANALYSIS_FILE=$(ls url_analysis_*.json 2>/dev/null | sort | tail -1)
-          
-          if [ -z "$ANALYSIS_FILE" ]; then
-            echo "No analysis file found locally, checking artifacts..."
-            
-            # If no local file, try to download from artifacts or create from urls.yml
-            echo "Creating analysis from urls.yml..."
-            
-            cat > create_analysis.py << 'EOF'
+          python -c "
           import yaml
           import json
           from datetime import datetime
@@ -104,7 +95,7 @@ jobs:
                           'url': url,
                           'type': 'direct_file',
                           'year': year,
-                          'filename': f"{archive_name}_{i+1:03d}.pdf"
+                          'filename': f'{archive_name}_{i+1:03d}.pdf'
                       }
                       year_files.append(file_info)
                       newspaper_info['files'].append(file_info)
@@ -115,25 +106,23 @@ jobs:
               analysis['newspapers'][archive_name] = newspaper_info
               analysis['summary']['total_archives'] += 1
           
-          analysis_file = f"url_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+          analysis_file = f'url_analysis_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.json'
           with open(analysis_file, 'w', encoding='utf-8') as f:
               json.dump(analysis, f, ensure_ascii=False, indent=2)
           
-          print(f"Created analysis file: {analysis_file}")
-          EOF
+          print(f'Created analysis file: {analysis_file}')
           
-            python create_analysis.py
-            ANALYSIS_FILE=$(ls url_analysis_*.json | sort | tail -1)
-          fi
-          
-          echo "Using analysis file: $ANALYSIS_FILE"
-          echo "ANALYSIS_FILE=$ANALYSIS_FILE" >> $GITHUB_ENV
+          # Set environment variable
+          import os
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'ANALYSIS_FILE={analysis_file}\\n')
+          "
 
       - name: Download files and build archives
         run: |
           echo "📥 Starting file download and archive building..."
           
-          cat > download_files.py << 'EOF'
+          python -c "
           import json
           import os
           import requests
@@ -161,38 +150,32 @@ jobs:
                   }
               
               def download_file(self, url, target_path, force_redownload=False):
-                  """Download a single file with retry logic."""
                   target_path = Path(target_path)
                   
-                  # Skip if file exists and not forcing redownload
                   if target_path.exists() and not force_redownload:
-                      print(f"⏭️  Skipping existing file: {target_path.name}")
+                      print(f'⏭️  Skipping existing file: {target_path.name}')
                       self.stats['skipped'] += 1
                       return True
                   
-                  # Create directory if needed
                   target_path.parent.mkdir(parents=True, exist_ok=True)
                   
                   for attempt in range(self.max_retries):
                       try:
-                          print(f"📥 Downloading: {url} -> {target_path.name} (attempt {attempt + 1})")
+                          print(f'📥 Downloading: {url} -> {target_path.name} (attempt {attempt + 1})')
                           
                           response = self.session.get(url, timeout=self.timeout, stream=True)
                           response.raise_for_status()
                           
-                          # Check content type
                           content_type = response.headers.get('content-type', '').lower()
                           if 'pdf' not in content_type and 'application/octet-stream' not in content_type:
-                              print(f"⚠️  Warning: Unexpected content type: {content_type}")
+                              print(f'⚠️  Warning: Unexpected content type: {content_type}')
                           
-                          # Check file size
                           content_length = response.headers.get('content-length')
                           if content_length and int(content_length) > self.max_file_size:
-                              print(f"❌ File too large: {content_length} bytes")
+                              print(f'❌ File too large: {content_length} bytes')
                               self.stats['failed'] += 1
                               return False
                           
-                          # Download file
                           total_size = 0
                           with open(target_path, 'wb') as f:
                               for chunk in response.iter_content(chunk_size=8192):
@@ -200,211 +183,118 @@ jobs:
                                       f.write(chunk)
                                       total_size += len(chunk)
                                       
-                                      # Check size limit during download
                                       if total_size > self.max_file_size:
-                                          print(f"❌ File size exceeded limit during download")
-                                          target_path.unlink()  # Delete partial file
+                                          print(f'❌ File size exceeded limit during download')
+                                          target_path.unlink()
                                           self.stats['failed'] += 1
                                           return False
                           
-                          print(f"✅ Downloaded: {target_path.name} ({total_size} bytes)")
+                          print(f'✅ Downloaded: {target_path.name} ({total_size} bytes)')
                           self.stats['downloaded'] += 1
                           self.stats['total_size'] += total_size
                           return True
                           
                       except requests.exceptions.RequestException as e:
-                          print(f"❌ Download failed (attempt {attempt + 1}): {e}")
+                          print(f'❌ Download failed (attempt {attempt + 1}): {e}')
                           if attempt < self.max_retries - 1:
-                              time.sleep(2 ** attempt)  # Exponential backoff
+                              time.sleep(2 ** attempt)
                           else:
                               self.stats['failed'] += 1
                               return False
                       
                       except Exception as e:
-                          print(f"❌ Unexpected error: {e}")
+                          print(f'❌ Unexpected error: {e}')
                           self.stats['failed'] += 1
                           return False
                   
                   return False
           
-          def main():
-              # Get environment variables
-              analysis_file = os.environ.get('ANALYSIS_FILE')
-              newspaper_filter = os.environ.get('NEWSPAPER_FILTER', '')
-              max_files_per_newspaper = int(os.environ.get('MAX_FILES_PER_NEWSPAPER', '100'))
-              force_redownload = os.environ.get('FORCE_REDOWNLOAD', 'false').lower() == 'true'
-              
-              if not analysis_file or not os.path.exists(analysis_file):
-                  print("❌ Analysis file not found!")
-                  sys.exit(1)
-              
-              # Load analysis
-              with open(analysis_file, 'r', encoding='utf-8') as f:
-                  analysis = json.load(f)
-              
-              downloader = FileDownloader()
-              
-              print(f"🚀 Starting download process...")
-              print(f"📊 Total newspapers: {len(analysis['newspapers'])}")
-              print(f"📊 Total files: {analysis['summary']['total_files']}")
-              if newspaper_filter:
-                  print(f"🔍 Filter: {newspaper_filter}")
-              print(f"📊 Max files per newspaper: {max_files_per_newspaper}")
-              print(f"🔄 Force redownload: {force_redownload}")
-              print("-" * 50)
-              
-              # Process each newspaper
-              for newspaper_name, info in analysis['newspapers'].items():
-                  # Apply filter if specified
-                  if newspaper_filter and newspaper_filter.lower() not in newspaper_name.lower():
-                      continue
-                  
-                  print(f"\n📰 Processing: {info['title_fa']} ({newspaper_name})")
-                  
-                  # Create newspaper directory
-                  newspaper_dir = Path(f"old-newspaper/{newspaper_name}")
-                  newspaper_dir.mkdir(parents=True, exist_ok=True)
-                  
-                  # Download files (limited by max_files_per_newspaper)
-                  files_downloaded = 0
-                  for file_info in info['files'][:max_files_per_newspaper]:
-                      if files_downloaded >= max_files_per_newspaper:
-                          break
-                      
-                      url = file_info['url']
-                      filename = file_info['filename']
-                      target_path = newspaper_dir / filename
-                      
-                      success = downloader.download_file(url, target_path, force_redownload)
-                      if success:
-                          files_downloaded += 1
-                      
-                      # Small delay between downloads
-                      time.sleep(0.5)
-                  
-                  print(f"📊 {newspaper_name}: {files_downloaded} files processed")
-              
-              # Print final statistics
-              print("\n" + "=" * 50)
-              print("📊 DOWNLOAD STATISTICS")
-              print("=" * 50)
-              print(f"✅ Downloaded: {downloader.stats['downloaded']} files")
-              print(f"⏭️  Skipped: {downloader.stats['skipped']} files")
-              print(f"❌ Failed: {downloader.stats['failed']} files")
-              print(f"💾 Total size: {downloader.stats['total_size'] / 1024 / 1024:.1f} MB")
-              print("=" * 50)
-              
-              # Save download report
-              report = {
-                  'download_date': datetime.now().isoformat(),
-                  'analysis_file': analysis_file,
-                  'statistics': downloader.stats,
-                  'settings': {
-                      'newspaper_filter': newspaper_filter,
-                      'max_files_per_newspaper': max_files_per_newspaper,
-                      'force_redownload': force_redownload
-                  }
-              }
-              
-              report_file = f"download_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-              with open(report_file, 'w', encoding='utf-8') as f:
-                  json.dump(report, f, ensure_ascii=False, indent=2)
-              
-              print(f"📄 Download report saved: {report_file}")
+          # Get environment variables
+          analysis_file = os.environ.get('ANALYSIS_FILE')
+          newspaper_filter = '${{ github.event.inputs.newspaper_filter }}'
+          max_files_per_newspaper = int('${{ github.event.inputs.max_files_per_newspaper }}' or '100')
+          force_redownload = '${{ github.event.inputs.force_redownload }}' == 'true'
           
-          if __name__ == '__main__':
-              main()
-          EOF
+          if not analysis_file or not os.path.exists(analysis_file):
+              print('❌ Analysis file not found!')
+              sys.exit(1)
           
-          # Set environment variables for the script
-          export NEWSPAPER_FILTER="${{ github.event.inputs.newspaper_filter }}"
-          export MAX_FILES_PER_NEWSPAPER="${{ github.event.inputs.max_files_per_newspaper || '100' }}"
-          export FORCE_REDOWNLOAD="${{ github.event.inputs.force_redownload || 'false' }}"
-          
-          # Run the downloader
-          python download_files.py
-
-      - name: Update README files with Wikipedia info
-        run: |
-          echo "📝 Updating README files with Wikipedia information..."
-          
-          cat > update_readmes.py << 'EOF'
-          import os
-          import sys
-          import json
-          from pathlib import Path
-          
-          # Add scripts directory to path
-          sys.path.append('scripts')
-          
-          try:
-              from wikipedia_fetcher import WikipediaFetcher
-              from readme_generator import ReadmeGenerator
-          except ImportError as e:
-              print(f"Warning: Could not import modules: {e}")
-              print("Skipping Wikipedia integration...")
-              exit(0)
-          
-          # Find latest analysis file
-          analysis_files = [f for f in os.listdir('.') if f.startswith('url_analysis_')]
-          if not analysis_files:
-              print("No analysis file found!")
-              exit(1)
-          
-          latest_analysis = sorted(analysis_files)[-1]
-          
-          with open(latest_analysis, 'r', encoding='utf-8') as f:
+          # Load analysis
+          with open(analysis_file, 'r', encoding='utf-8') as f:
               analysis = json.load(f)
           
-          wikipedia_fetcher = WikipediaFetcher()
-          readme_generator = ReadmeGenerator()
+          downloader = FileDownloader()
           
-          # Update README for each newspaper
+          print(f'🚀 Starting download process...')
+          print(f'📊 Total newspapers: {len(analysis[\"newspapers\"])}')
+          print(f'📊 Total files: {analysis[\"summary\"][\"total_files\"]}')
+          if newspaper_filter:
+              print(f'🔍 Filter: {newspaper_filter}')
+          print(f'📊 Max files per newspaper: {max_files_per_newspaper}')
+          print(f'🔄 Force redownload: {force_redownload}')
+          print('-' * 50)
+          
+          # Process each newspaper
           for newspaper_name, info in analysis['newspapers'].items():
-              newspaper_dir = Path(f"old-newspaper/{newspaper_name}")
-              if not newspaper_dir.exists():
+              if newspaper_filter and newspaper_filter.lower() not in newspaper_name.lower():
                   continue
               
-              readme_path = newspaper_dir / "README.md"
+              print(f'\\n📰 Processing: {info[\"title_fa\"]} ({newspaper_name})')
               
-              # Create archive info for README generator
-              archive_info = {
-                  'title_fa': info['title_fa'],
-                  'title_en': info['title_en'],
-                  'folder': info['folder'],
-                  'category': info['category'],
-                  'description': info['description'],
-                  'years': {},
-                  'source_info': {
-                      'newspaper_name': info['newspaper_name'],
-                      'crawl_date': analysis['analysis_date']
-                  }
+              newspaper_dir = Path(f'old-newspaper/{newspaper_name}')
+              newspaper_dir.mkdir(parents=True, exist_ok=True)
+              
+              files_downloaded = 0
+              for file_info in info['files'][:max_files_per_newspaper]:
+                  if files_downloaded >= max_files_per_newspaper:
+                      break
+                  
+                  url = file_info['url']
+                  filename = file_info['filename']
+                  target_path = newspaper_dir / filename
+                  
+                  success = downloader.download_file(url, target_path, force_redownload)
+                  if success:
+                      files_downloaded += 1
+                  
+                  time.sleep(0.5)
+              
+              print(f'📊 {newspaper_name}: {files_downloaded} files processed')
+          
+          # Print final statistics
+          print('\\n' + '=' * 50)
+          print('📊 DOWNLOAD STATISTICS')
+          print('=' * 50)
+          print(f'✅ Downloaded: {downloader.stats[\"downloaded\"]} files')
+          print(f'⏭️  Skipped: {downloader.stats[\"skipped\"]} files')
+          print(f'❌ Failed: {downloader.stats[\"failed\"]} files')
+          print(f'💾 Total size: {downloader.stats[\"total_size\"] / 1024 / 1024:.1f} MB')
+          print('=' * 50)
+          
+          # Save download report
+          report = {
+              'download_date': datetime.now().isoformat(),
+              'analysis_file': analysis_file,
+              'statistics': downloader.stats,
+              'settings': {
+                  'newspaper_filter': newspaper_filter,
+                  'max_files_per_newspaper': max_files_per_newspaper,
+                  'force_redownload': force_redownload
               }
-              
-              # Convert file info to years format
-              for year, files in info['years'].items():
-                  archive_info['years'][year] = [f['url'] for f in files]
-              
-              try:
-                  # Generate README with Wikipedia info
-                  readme_generator.generate_publication_readme(
-                      archive_info, 
-                      output_path=str(readme_path)
-                  )
-                  print(f"✅ Updated README for {newspaper_name}")
-              except Exception as e:
-                  print(f"❌ Failed to update README for {newspaper_name}: {e}")
+          }
           
-          print("README update complete!")
-          EOF
+          report_file = f'download_report_{datetime.now().strftime(\"%Y%m%d_%H%M%S\")}.json'
+          with open(report_file, 'w', encoding='utf-8') as f:
+              json.dump(report, f, ensure_ascii=False, indent=2)
           
-          python update_readmes.py
+          print(f'📄 Download report saved: {report_file}')
+          "
 
       - name: Update main README
         run: |
           echo "📝 Updating main README file..."
           
-          cat > update_main_readme.py << 'EOF'
+          python -c "
           import os
           import json
           from pathlib import Path
@@ -415,7 +305,7 @@ jobs:
           report_files = [f for f in os.listdir('.') if f.startswith('download_report_')]
           
           if not analysis_files:
-              print("No analysis file found!")
+              print('No analysis file found!')
               exit(1)
           
           latest_analysis = sorted(analysis_files)[-1]
@@ -431,87 +321,92 @@ jobs:
                   download_stats = report.get('statistics', {})
           
           # Generate main README content
-          readme_content = f"""# آرشیو مطبوعات ایران / Iranian Press Archive
-
-این مخزن شامل آرشیو دیجیتال روزنامه‌ها و نشریات ایرانی است که به صورت خودکار جمع‌آوری و سازماندهی شده‌اند.
-
-This repository contains a digital archive of Iranian newspapers and publications, automatically collected and organized.
-
-## 📊 آمار کلی / General Statistics
-
-- **تعداد نشریات / Total Publications**: {analysis['summary']['total_archives']}
-- **تعداد کل فایل‌ها / Total Files**: {analysis['summary']['total_files']}
-"""
+          readme_lines = [
+              '# آرشیو مطبوعات ایران / Iranian Press Archive',
+              '',
+              'این مخزن شامل آرشیو دیجیتال روزنامه‌ها و نشریات ایرانی است که به صورت خودکار جمع‌آوری و سازماندهی شده‌اند.',
+              '',
+              'This repository contains a digital archive of Iranian newspapers and publications, automatically collected and organized.',
+              '',
+              '## 📊 آمار کلی / General Statistics',
+              '',
+              f'- **تعداد نشریات / Total Publications**: {analysis[\"summary\"][\"total_archives\"]}',
+              f'- **تعداد کل فایل‌ها / Total Files**: {analysis[\"summary\"][\"total_files\"]}'
+          ]
           
           if download_stats:
-              readme_content += f"""- **فایل‌های دانلود شده / Downloaded Files**: {download_stats.get('downloaded', 0)}
-- **حجم کل / Total Size**: {download_stats.get('total_size', 0) / 1024 / 1024:.1f} MB
-"""
+              readme_lines.extend([
+                  f'- **فایل‌های دانلود شده / Downloaded Files**: {download_stats.get(\"downloaded\", 0)}',
+                  f'- **حجم کل / Total Size**: {download_stats.get(\"total_size\", 0) / 1024 / 1024:.1f} MB'
+              ])
           
-          readme_content += f"""
-## 📰 نشریات موجود / Available Publications
-
-"""
+          readme_lines.extend([
+              '',
+              '## 📰 نشریات موجود / Available Publications',
+              ''
+          ])
           
           # List all newspapers
           for newspaper_name, info in analysis['newspapers'].items():
-              newspaper_dir = Path(f"old-newspaper/{newspaper_name}")
+              newspaper_dir = Path(f'old-newspaper/{newspaper_name}')
               if newspaper_dir.exists():
-                  file_count = len([f for f in newspaper_dir.glob("*.pdf")])
-                  readme_content += f"- **[{info['title_fa']}](old-newspaper/{newspaper_name}/)** - {file_count} فایل\n"
+                  file_count = len([f for f in newspaper_dir.glob('*.pdf')])
+                  readme_lines.append(f'- **[{info[\"title_fa\"]}](old-newspaper/{newspaper_name}/)** - {file_count} فایل')
           
-          readme_content += f"""
-## 🔄 آخرین بروزرسانی / Last Update
-
-- **تجزیه و تحلیل URL ها / URL Analysis**: {analysis['analysis_date']}
-"""
+          readme_lines.extend([
+              '',
+              '## 🔄 آخرین بروزرسانی / Last Update',
+              '',
+              f'- **تجزیه و تحلیل URL ها / URL Analysis**: {analysis[\"analysis_date\"]}'
+          ])
           
           if latest_report:
               with open(latest_report, 'r', encoding='utf-8') as f:
                   report = json.load(f)
-              readme_content += f"- **دانلود فایل‌ها / File Download**: {report['download_date']}\n"
+              readme_lines.append(f'- **دانلود فایل‌ها / File Download**: {report[\"download_date\"]}')
           
-          readme_content += f"""
-## 🤖 سیستم خودکار / Automated System
-
-این آرشیو با استفاده از GitHub Actions به صورت خودکار بروزرسانی می‌شود:
-
-1. **تجزیه و تحلیل URL ها**: هفتگی یکشنبه‌ها ساعت 3 صبح UTC
-2. **دانلود فایل‌ها**: روزانه ساعت 4 صبح UTC
-
-This archive is automatically updated using GitHub Actions:
-
-1. **URL Analysis**: Weekly on Sundays at 3 AM UTC
-2. **File Download**: Daily at 4 AM UTC
-
-## 📁 ساختار پوشه‌ها / Directory Structure
-
-```
-old-newspaper/
-├── neshat/          # آرشیو نشریه نشاط
-├── kayhan/          # آرشیو نشریه کیهان
-├── tous/            # آرشیو نشریه توس
-└── ...
-```
-
-## 🔗 منابع / Sources
-
-فایل‌ها از منابع مختلف جمع‌آوری شده‌اند و اطلاعات تکمیلی از ویکی‌پدیا استخراج شده است.
-
-Files are collected from various sources and supplementary information is extracted from Wikipedia.
-
----
-*آخرین بروزرسانی خودکار / Last automatic update: {datetime.now().isoformat()}*
-"""
+          readme_lines.extend([
+              '',
+              '## 🤖 سیستم خودکار / Automated System',
+              '',
+              'این آرشیو با استفاده از GitHub Actions به صورت خودکار بروزرسانی می‌شود:',
+              '',
+              '1. **تجزیه و تحلیل URL ها**: هفتگی یکشنبه‌ها ساعت 3 صبح UTC',
+              '2. **دانلود فایل‌ها**: روزانه ساعت 4 صبح UTC',
+              '',
+              'This archive is automatically updated using GitHub Actions:',
+              '',
+              '1. **URL Analysis**: Weekly on Sundays at 3 AM UTC',
+              '2. **File Download**: Daily at 4 AM UTC',
+              '',
+              '## 📁 ساختار پوشه‌ها / Directory Structure',
+              '',
+              '```',
+              'old-newspaper/',
+              '├── neshat/          # آرشیو نشریه نشاط',
+              '├── kayhan/          # آرشیو نشریه کیهان',
+              '├── tous/            # آرشیو نشریه توس',
+              '└── ...',
+              '```',
+              '',
+              '## 🔗 منابع / Sources',
+              '',
+              'فایل‌ها از منابع مختلف جمع‌آوری شده‌اند و اطلاعات تکمیلی از ویکی‌پدیا استخراج شده است.',
+              '',
+              'Files are collected from various sources and supplementary information is extracted from Wikipedia.',
+              '',
+              '---',
+              f'*آخرین بروزرسانی خودکار / Last automatic update: {datetime.now().isoformat()}*'
+          ])
+          
+          readme_content = '\\n'.join(readme_lines)
           
           # Write main README
           with open('README.md', 'w', encoding='utf-8') as f:
               f.write(readme_content)
           
-          print("✅ Main README updated!")
-          EOF
-          
-          python update_main_readme.py
+          print('✅ Main README updated!')
+          "
 
       - name: Commit downloaded files
         run: |
@@ -522,14 +417,14 @@ Files are collected from various sources and supplementary information is extrac
             # Count new files
             NEW_FILES=$(git status --porcelain | grep "^A" | wc -l)
             MODIFIED_FILES=$(git status --porcelain | grep "^M" | wc -l)
+            NEWSPAPER_COUNT=$(ls old-newspaper/ 2>/dev/null | wc -l)
             
             git add .
             git commit -m "feat: download and organize newspaper files
 
-- Downloaded files for $(ls old-newspaper/ | wc -l) newspapers
+- Downloaded files for $NEWSPAPER_COUNT newspapers
 - Added $NEW_FILES new files
 - Updated $MODIFIED_FILES existing files
-- Generated README files with Wikipedia integration
 - Updated main archive index"
             git push
           else
