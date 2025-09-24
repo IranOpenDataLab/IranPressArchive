@@ -13,4 +13,17 @@ archives:
       base_url: "https://dl.jalaeipour.com/neshat/"
       crawl_date: "2025-09-24 23:30:00"
       newspaper_name: "نشاط"
+      total_files: 2
+  - title_fa: "آرشیو نشریه کیهان"
+    title_en: "Kayhan Archive"
+    folder: "kayhan"
+    category: "old-newspaper"
+    description: "آرشیو نشریه کیهان - تست GitHub Actions"
+    years:
+      "1402":
+        - "https://www.adobe.com/support/products/enterprise/knowledgecenter/media/c4611_sample_explain.pdf"
+    source_info:
+      base_url: "https://example.com/kayhan/"
+      crawl_date: "2025-09-25 00:00:00"
+      newspaper_name: "کیهان"
       total_files: 1
