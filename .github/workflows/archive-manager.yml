@@ -52,14 +52,14 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyyaml requests psutil pandas matplotlib
+          pip install pyyaml requests psutil pandas matplotlib beautifulsoup4
 
       - name: Determine execution mode
         id: mode
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload performance artifacts
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: performance-data-${{ github.run_number }}
           path: |
