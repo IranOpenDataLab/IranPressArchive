@@ -8,7 +8,7 @@ This repository contains a collection of Iranian public documents including news
 
 ### Jalaeipour Complete
 
-Available years: [1400](old-newspaper/jalaeipour-complete/1400) | [1401](old-newspaper/jalaeipour-complete/1401)
+Available years: [1400](old-newspaper/jalaeipour-complete/1400)
 
 ## About This Project
 

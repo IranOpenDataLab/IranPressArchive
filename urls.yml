@@ -6,7 +6,5 @@ archives:
     description: " نشریات موجود در سایت جلائی‌پور شامل توس، جامعه، نشاط و عصر آزادگان"
     years:
       "1400":
-        - "https://dl.jalaeipour.com/archive/newspapers/1400/sample.pdf"
-        - "https://dl.jalaeipour.com/archive/newspapers/1400/test-document.pdf"
-      "1401":
-        - "https://dl.jalaeipour.com/archive/newspapers/1401/sample2.pdf"
+        - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+        - "https://www.africau.edu/images/default/sample.pdf"

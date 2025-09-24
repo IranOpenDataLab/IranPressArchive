@@ -8,7 +8,7 @@
 
 ### آرشیو سایت جلائی‌پور
 
-سال‌های موجود: [1400](old-newspaper/jalaeipour-complete/1400) | [1401](old-newspaper/jalaeipour-complete/1401)
+سال‌های موجود: [1400](old-newspaper/jalaeipour-complete/1400)
 
 ## درباره این پروژه
 
