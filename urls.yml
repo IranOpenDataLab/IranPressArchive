@@ -35,6 +35,8 @@ archives:
     years:
       "1403":
         - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+      "1404":
+        - "https://www.adobe.com/support/products/enterprise/knowledgecenter/media/c4611_sample_explain.pdf"
     source_info:
       base_url: "https://example.com/tous/"
       crawl_date: "2025-09-25 00:05:00"
