@@ -16,11 +16,11 @@ Available years: [1402](old-newspaper/kayhan/1402)
 
 ### Tous
 
-Available years: [1403](old-newspaper/tous/1403)
+Available years: [1403](old-newspaper/tous/1403) | [1404](old-newspaper/tous/1404)
 
 ## About This Project
 
 This archive is automatically updated using GitHub Actions. The goal of this project is to preserve and provide easy access to Iranian historical and contemporary documents.
 
 ---
-*Last updated: 2025/09/24*
+*Last updated: 2025/09/25*
