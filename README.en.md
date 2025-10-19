@@ -23,4 +23,4 @@ Available years: [1403](old-newspaper/tous/1403) | [1404](old-newspaper/tous/140
 This archive is automatically updated using GitHub Actions. The goal of this project is to preserve and provide easy access to Iranian historical and contemporary documents.
 
 ---
-*Last updated: 2025/10/18*
+*Last updated: 2025/10/19*
