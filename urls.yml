@@ -1,44 +1,56 @@
-archives:
-  - title_fa: "آرشیو نشریه نشاط"
-    title_en: "Neshat Archive"
-    folder: "neshat"
-    category: "old-newspaper"
-    description: "آرشیو نشریه نشاط - دانلود از سایت جلائی‌پور"
-    years:
-      "1400":
-        - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-      "1401":
-        - "https://www.learningcontainer.com/wp-content/uploads/2019/09/sample-pdf-file.pdf"
-    source_info:
-      base_url: "https://dl.jalaeipour.com/neshat/"
-      crawl_date: "2025-09-24 23:30:00"
-      newspaper_name: "نشاط"
-      total_files: 2
-  - title_fa: "آرشیو نشریه کیهان"
-    title_en: "Kayhan Archive"
-    folder: "kayhan"
-    category: "old-newspaper"
-    description: "آرشیو نشریه کیهان - تست GitHub Actions"
-    years:
-      "1402":
-        - "https://www.adobe.com/support/products/enterprise/knowledgecenter/media/c4611_sample_explain.pdf"
-    source_info:
-      base_url: "https://example.com/kayhan/"
-      crawl_date: "2025-09-25 00:00:00"
-      newspaper_name: "کیهان"
-      total_files: 1
-  - title_fa: "آرشیو نشریه توس"
-    title_en: "Tous Archive"
-    folder: "tous"
-    category: "old-newspaper"
-    description: "آرشیو نشریه توس - تست GitHub Actions"
-    years:
-      "1403":
-        - "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-      "1404":
-        - "https://www.adobe.com/support/products/enterprise/knowledgecenter/media/c4611_sample_explain.pdf"
-    source_info:
-      base_url: "https://example.com/tous/"
-      crawl_date: "2025-09-25 00:05:00"
-      newspaper_name: "توس"
-      total_files: 1
+# ============================================================
+#  urls.yml — پیکربندی منابع آرشیو مطبوعات و اسناد ایران
+# ============================================================
+#  هر منبع یک آیتم در فهرست sources است با این کلیدها:
+#
+#    name       (الزامی) نام فارسی منبع
+#    id         (الزامی) شناسه انگلیسی یکتا — نام پوشه خروجی هم می‌شود
+#    type       (الزامی) یکی از چهار نوع پشتیبانی‌شده:
+#                 google_drive_folder : پوشه عمومی گوگل‌درایو
+#                 google_drive_file   : فایل تکی گوگل‌درایو
+#                 index_page          : صفحه فهرست لینک فایل‌ها (مثل Apache index)
+#                 direct_files        : فهرست دستی URL مستقیم فایل‌ها
+#    url        (الزامی برای سه نوع اول)
+#    files      (الزامی برای direct_files) فهرست URLها
+#
+#  کلیدهای اختیاری برای index_page:
+#    extensions : پسوندهای موردنظر؛ پیش‌فرض [".pdf"]
+#    recursive  : خزش در زیرپوشه‌ها؛ پیش‌فرض true
+# ============================================================
+
+sources:
+  - name: توس
+    id: tous
+    type: google_drive_folder
+    url: "https://drive.google.com/drive/folders/1N99McxPkLSsgsDB7OAf-30HunEcugi0u"
+
+  - name: جامعه
+    id: jameeh
+    type: google_drive_folder
+    url: "https://drive.google.com/drive/folders/1b8MVocgWUNt4Uq_Ar8goffCU--odoYfP"
+
+  - name: عصر آزادگان
+    id: asr-azadegan
+    type: google_drive_folder
+    url: "https://drive.google.com/drive/folders/1wLPrjrcSky_r3Ej5yYnAU4SfC6sLlNZg"
+
+  - name: نشاط
+    id: neshat
+    type: index_page
+    url: "https://jalaeipour.com/NESHAT/"
+    extensions: [".pdf"]
+    recursive: true
+
+# ---------- نمونه برای پروژه‌های بعدی ----------
+#
+#  - name: نمونه فایل تکی درایو
+#    id: sample-drive-file
+#    type: google_drive_file
+#    url: "https://drive.google.com/file/d/FILE_ID/view"
+#
+#  - name: نمونه فهرست دستی
+#    id: sample-direct
+#    type: direct_files
+#    files:
+#      - "https://example.org/docs/a.pdf"
+#      - "https://example.org/docs/b.pdf"
