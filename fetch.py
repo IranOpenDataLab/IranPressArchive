@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نسخه ۴)
+fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نسخه ۵)
 
 پشتیبانی از پنج نوع ساختار لینک (تعریف در urls.yml):
   google_drive_folder / google_drive_file / index_page / url_sequence / direct_files
@@ -11,27 +11,30 @@ fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نس�
   2) ثبت همه فایل‌ها در data/manifest.json (نام، تاریخ، اندازه، sha256، منبع)
   3) بازسازی خودکار بخش فهرست دانلود در README.md
 
+فشرده‌سازی فایل‌های بزرگ‌تر از سقف گیت (با API سرویس apdf.io):
+  - اگر متغیر محیطی APDF_API_KEY تنظیم شده باشد و فایلی از سقف ۱۰۰MiB
+    بزرگ‌تر باشد، URL اصلی فایل به POST /pdf/file/compress فرستاده می‌شود،
+    وضعیت job تا تکمیل poll می‌شود و نسخه فشرده دانلود و ذخیره می‌گردد.
+  - کلید API هرگز در ریپو ذخیره نمی‌شود؛ در GitHub به‌صورت Secret تعریف شود.
+  - برای تست محلی، آدرس API با متغیر APDF_API_BASE قابل تغییر است.
+
 ویژگی‌های تاب‌آوری:
-  - خطای یک فایل، دانلود بقیه را متوقف نمی‌کند (رفتن به لینک بعدی)
-  - خطای یک منبع، منابع بعدی را متوقف نمی‌کند
+  - خطای یک فایل/منبع، ادامه کار را متوقف نمی‌کند
   - تلاش مجدد خودکار (۳ بار) برای خطاهای شبکه/سرور؛ 404 فقط ثبت می‌شود
   - فایل موجود روی دیسک هرگز دوباره دانلود نمی‌شود
   - سقف حجم هر فایل دقیقا ۱۰۰ مگابایت (۱۰۰ MiB — هاردلیمیت گیت‌هاب)
-  - چاپ کامل traceback هر خطا برای عیب‌یابی در لاگ Workflow
-
-نمونه اجرا:
-  python fetch.py                      # همه منابع + بازسازی فهرست
-  python fetch.py --source neshat     # فقط یک منبع
-  python fetch.py --dry-run           # فقط گزارش، بدون دانلود
+  - چاپ کامل traceback و پاسخ‌های API برای عیب‌یابی در لاگ Workflow
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
 import sys
 import time
 import traceback
+import urllib.parse
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from urllib.error import HTTPError
@@ -45,11 +48,16 @@ except ImportError:
 
 from make_index import sha256_of, scan_and_register, rebuild_index, save_manifest, load_manifest
 
-USER_AGENT = "IranPressArchiveFetcher/4.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
+USER_AGENT = "IranPressArchiveFetcher/5.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
 DEFAULT_EXTENSIONS = [".pdf"]
 MANIFEST_PATH = "data/manifest.json"
 MAX_FILE_MB_DEFAULT = 100         # دقیقا هاردلیمیت گیت‌هاب (۱۰۰ MiB)
 RETRIES = 3
+
+APDF_API_BASE = os.environ.get("APDF_API_BASE", "https://apdf.io/api")
+APDF_KEY = os.environ.get("APDF_API_KEY", "").strip()
+APDF_POLL_INTERVAL = 5            # ثانیه بین هر poll (سهمیه API: ۳ درخواست/ثانیه)
+APDF_POLL_TIMEOUT = 20 * 60      # حداکثر انتظار برای تکمیل هر job
 
 
 def load_config(path):
@@ -73,10 +81,7 @@ def safe_filename(name):
 
 
 def download_file(url, dest, max_bytes):
-    """دانلود با تلاش مجدد و سقف حجم.
-    خروجی: (status, info) که status یکی از
-    downloaded / exists / missing / too-large / error است.
-    اگر فایل مقصد از قبل روی دیسک باشد، هیچ درخواست شبکه‌ای زده نمی‌شود."""
+    """خروجی: (status, info) — downloaded / exists / missing / too-large / error"""
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         return "exists", os.path.getsize(dest)
 
@@ -118,6 +123,80 @@ def download_file(url, dest, max_bytes):
     print(f"  [خطای کامل] {url}:")
     traceback.print_exc()
     return "error", str(last_err)
+
+
+# ---------- فشرده‌سازی با API سرویس apdf.io ----------
+
+def _find_key(obj, *names):
+    """جستجوی بازگشتی یک کلید در JSON (مستقل از تودرتویی پاسخ API)."""
+    if isinstance(obj, dict):
+        for k in names:
+            if k in obj and obj[k] not in (None, ""):
+                return obj[k]
+        for v in obj.values():
+            r = _find_key(v, *names)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _find_key(v, *names)
+            if r is not None:
+                return r
+    return None
+
+
+def _api_call(method, path, data=None):
+    url = APDF_API_BASE.rstrip("/") + path
+    body = urllib.parse.urlencode(data).encode() if data else None
+    req = Request(url, data=body, method=method, headers={
+        "Authorization": f"Bearer {APDF_KEY}",
+        "Accept": "application/json",
+    })
+    with urlopen(req, timeout=60) as r:
+        raw = r.read().decode("utf-8", errors="replace")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        print(f"  [پاسخ غیر JSON از API] {raw[:2000]}")
+        return {}
+
+
+def apdf_compress_to_file(file_url, dest, max_bytes):
+    """فشرده‌سازی فایل از طریق apdf.io و دانلود نتیجه.
+    خروجی: حجم فایل فشرده‌شده، یا Exception با جزئیات کامل."""
+    resp = _api_call("POST", "/pdf/file/compress", {"file": file_url})
+    print(f"  [apdf] پاسخ compress: {json.dumps(resp, ensure_ascii=False)[:1000]}")
+    job_id = _find_key(resp, "job_id", "jobId", "id")
+    if not job_id:
+        raise RuntimeError(f"job_id در پاسخ API پیدا نشد: {resp}")
+
+    started = time.time()
+    final = None
+    while time.time() - started < APDF_POLL_TIMEOUT:
+        time.sleep(APDF_POLL_INTERVAL)
+        st = _api_call("GET", f"/jobs/{job_id}")
+        status = str(_find_key(st, "status") or "").lower()
+        print(f"  [apdf] job {job_id}: {status} | {json.dumps(st, ensure_ascii=False)[:500]}")
+        if status in ("completed", "succeeded", "success", "done", "finished"):
+            final = st
+            break
+        if status in ("failed", "error", "cancelled", "canceled"):
+            raise RuntimeError(f"job فشرده‌سازی شکست خورد: {st}")
+    if final is None:
+        raise RuntimeError(f"job {job_id} در مهلت {APDF_POLL_TIMEOUT//60} دقیقه تکمیل نشد")
+
+    out_url = _find_key(final, "file_url", "fileUrl", "url")
+    if not out_url:
+        raise RuntimeError(f"file_url در پاسخ نهایی API پیدا نشد: {final}")
+
+    status, info = download_file(out_url, dest, max_bytes)
+    if status != "downloaded":
+        raise RuntimeError(f"دانلود فایل فشرده ناموفق بود: {status} {info}")
+    size = os.path.getsize(dest)
+    if size > max_bytes:
+        os.remove(dest)
+        raise RuntimeError(f"فایل حتی بعد از فشرده‌سازی بزرگ‌تر از سقف است ({size/1e6:.1f}MB)")
+    return size
 
 
 # ---------- خزنده صفحات ایندکس ----------
@@ -170,9 +249,6 @@ def gdown_available():
 
 
 def fetch_drive_folder(url, dest_dir):
-    """خروجی gdown مستقیم به لاگ می‌رود تا خطاها کامل دیده شوند.
-    گزینه --continue باعث می‌شود فایل کامل موجود دوباره گرفته نشود و
-    دانلود نیمه‌تمام از سر گرفته شود."""
     cmd = ["gdown", "--folder", url, "-O", dest_dir, "--no-cookies", "--remaining-ok", "--continue"]
     res = subprocess.run(cmd)
     if res.returncode != 0:
@@ -180,7 +256,6 @@ def fetch_drive_folder(url, dest_dir):
 
 
 def enforce_size_limit(dest_dir, max_bytes):
-    """فایل‌های بزرگ‌تر از سقف گیت را حذف می‌کند تا پوش نرم شکسته نشود."""
     for root, _, fnames in os.walk(dest_dir):
         for fn in fnames:
             p = os.path.join(root, fn)
@@ -207,19 +282,36 @@ def register_file(src_state, rel_path, full_path, url=None, date_display=None, d
     src_state["files"][rel_path] = entry
 
 
+def fetch_or_compress(url, dest, max_bytes):
+    """دانلود؛ اگر فایل از سقف بزرگ‌تر بود و کلید apdf تنظیم شده بود،
+    فشرده‌سازی کن. خروجی: (status, info)"""
+    status, info = download_file(url, dest, max_bytes)
+    if status == "too-large" and APDF_KEY:
+        print(f"  [apdf] فایل {info} بزرگ‌تر از سقف است — تلاش برای فشرده‌سازی...")
+        try:
+            size = apdf_compress_to_file(url, dest, max_bytes)
+            return "compressed", size
+        except Exception:
+            print("  [apdf] فشرده‌سازی شکست خورد — خطای کامل:")
+            traceback.print_exc()
+            return "too-large", info
+    return status, info
+
+
 # ---------- پردازش هر منبع ----------
 
 def process_source(src, args, manifest):
     sid = src.get("id") or src["name"]
     stype = src["type"]
     dest_dir = os.path.join("archive", sid)
-    max_bytes = int(src.get("max_file_mb", MAX_FILE_MB_DEFAULT)) * 1024 * 1024  # MiB
+    max_bytes = int(src.get("max_file_mb", MAX_FILE_MB_DEFAULT)) * 1024 * 1024
     src_state = manifest["sources"].setdefault(sid, {"name": src["name"], "files": {}, "seen_urls": []})
     files = src_state.setdefault("files", {})
     seen_urls = set(src_state.get("seen_urls", []))
     print(f"\n=== {src['name']} ({sid}) | نوع: {stype} ===")
+    if APDF_KEY:
+        print("(فشرده‌سازی apdf.io فعال)")
 
-    # --- پوشه گوگل‌درایو ---
     if stype == "google_drive_folder":
         if args.dry_run:
             print("[dry-run] پوشه درایو با gdown همگام می‌شود.")
@@ -230,7 +322,6 @@ def process_source(src, args, manifest):
         fetch_drive_folder(src["url"], dest_dir)
         enforce_size_limit(dest_dir, max_bytes)
 
-    # --- فایل تکی درایو ---
     elif stype == "google_drive_file":
         if args.dry_run:
             print(f"[dry-run] فایل درایو: {src['url']}")
@@ -243,12 +334,11 @@ def process_source(src, args, manifest):
             raise RuntimeError(f"gdown با کد {res.returncode} شکست خورد (لاگ بالا)")
         enforce_size_limit(dest_dir, max_bytes)
 
-    # --- دنباله ترتیبی URL (مثل نشاط: /dl/neshat/1377/1.pdf) ---
     elif stype == "url_sequence":
         tmpl = src["url_template"]
         name_tmpl = src.get("filename_template", f"{sid}_{{year}}_{{issue:03d}}.pdf")
         delay = float(src.get("delay_seconds", 1))
-        counts = {"downloaded": 0, "missing": 0, "error": 0, "too-large": 0, "skipped": 0}
+        counts = {"downloaded": 0, "compressed": 0, "missing": 0, "error": 0, "too-large": 0, "skipped": 0}
         for seq in src.get("sequences", []):
             year, start, end = seq["year"], seq["start"], seq["end"]
             print(f"— سال {year}: شماره {start} تا {end}")
@@ -264,16 +354,21 @@ def process_source(src, args, manifest):
                     print(f"  [{status}] {url}")
                     continue
                 os.makedirs(dest_dir, exist_ok=True)
-                status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
-                if status == "downloaded":
+                status, info = fetch_or_compress(url, os.path.join(dest_dir, fname), max_bytes)
+                if status in ("downloaded", "compressed"):
+                    extra = {"year": year, "issue": issue}
+                    if status == "compressed":
+                        extra["compressed"] = True
+                        extra["original_url"] = url
                     register_file(
                         src_state, rel, os.path.join(dest_dir, fname), url=url,
                         date_display=f"سال {year} — شماره {issue}",
                         date_iso=f"{year:04d}-{issue:06d}",
-                        extra={"year": year, "issue": issue},
+                        extra=extra,
                     )
-                    counts["downloaded"] += 1
-                    print(f"  [ok] {fname} ({info/1e6:.1f}MB)")
+                    counts[status] += 1
+                    size_mb = info / 1e6 if isinstance(info, (int, float)) else info
+                    print(f"  [{status}] {fname} ({size_mb}MB)")
                 elif status == "exists":
                     counts["skipped"] += 1
                 else:
@@ -285,7 +380,6 @@ def process_source(src, args, manifest):
         src_state["seen_urls"] = sorted(seen_urls)
         return
 
-    # --- صفحه ایندکس ---
     elif stype == "index_page":
         exts = [e.lower() for e in src.get("extensions", DEFAULT_EXTENSIONS)]
         links = crawl_index(src["url"], exts, src.get("recursive", True))
@@ -300,10 +394,11 @@ def process_source(src, args, manifest):
                 continue
             fname = safe_filename(os.path.basename(urlparse(link).path))
             rel = f"{sid}/{fname}"
-            status, info = download_file(link, os.path.join(dest_dir, fname), max_bytes)
-            if status == "downloaded":
-                register_file(src_state, rel, os.path.join(dest_dir, fname), url=link)
-                print(f"  [ok] {fname}")
+            status, info = fetch_or_compress(link, os.path.join(dest_dir, fname), max_bytes)
+            if status in ("downloaded", "compressed"):
+                extra = {"compressed": True, "original_url": link} if status == "compressed" else None
+                register_file(src_state, rel, os.path.join(dest_dir, fname), url=link, extra=extra)
+                print(f"  [{status}] {fname}")
             elif status == "exists":
                 if rel not in files:
                     register_file(src_state, rel, os.path.join(dest_dir, fname), url=link)
@@ -315,7 +410,6 @@ def process_source(src, args, manifest):
                 time.sleep(delay)
         src_state["seen_urls"] = sorted(seen_urls)
 
-    # --- فهرست مستقیم ---
     elif stype == "direct_files":
         for url in src.get("files", []):
             if args.dry_run:
@@ -325,10 +419,11 @@ def process_source(src, args, manifest):
                 continue
             fname = safe_filename(os.path.basename(urlparse(url).path))
             rel = f"{sid}/{fname}"
-            status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
-            if status == "downloaded":
-                register_file(src_state, rel, os.path.join(dest_dir, fname), url=url)
-                print(f"  [ok] {fname}")
+            status, info = fetch_or_compress(url, os.path.join(dest_dir, fname), max_bytes)
+            if status in ("downloaded", "compressed"):
+                extra = {"compressed": True, "original_url": url} if status == "compressed" else None
+                register_file(src_state, rel, os.path.join(dest_dir, fname), url=url, extra=extra)
+                print(f"  [{status}] {fname}")
             elif status == "exists":
                 if rel not in files:
                     register_file(src_state, rel, os.path.join(dest_dir, fname), url=url)

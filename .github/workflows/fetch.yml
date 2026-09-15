@@ -37,6 +37,10 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run fetcher (full logs, unbuffered)
+        env:
+          # کلید فشرده‌سازی apdf.io — از Secrets ریپو خوانده می‌شود
+          # تنظیم: Settings ← Secrets and variables ← Actions ← New repository secret
+          APDF_API_KEY: ${{ secrets.APDF_API_KEY }}
         run: |
           ARGS=""
           if [ -n "${{ inputs.source }}" ]; then
