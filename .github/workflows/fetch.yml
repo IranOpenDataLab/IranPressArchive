@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 180
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,7 +51,7 @@ jobs:
           fi
           python -u fetch.py $ARGS
 
-      - name: Commit and push new files
+      - name: Commit and push new files (batched)
         if: ${{ !cancelled() }}
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
@@ -60,10 +60,43 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add archive data README.md
-          if git diff --cached --quiet; then
-            echo "فایل جدیدی برای کامیت نیست."
-          else
-            git commit -m "آرشیو: افزودن فایل‌های جدید [skip ci]"
-            git push
+          # بافر بزرگ‌تر برای انتقال + پوش بچ‌بندی‌شده تا خطای HTTP 500 (پکیج بیش از حد بزرگ) رخ ندهد
+          git config http.postBuffer 524288000
+
+          # منیفست و README در یک کامیت جدا
+          git add data README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "آرشیو: به‌روزرسانی منیفست و فهرست [skip ci]"
           fi
+
+          # فایل‌های PDF را در بسته‌های حداکثر ۳۰۰ مگابایت یا ۴۰ فایلی کامیت و پوش کن
+          MAX_BATCH_BYTES=314572800
+          total=0; n=0; batch=1
+          while IFS= read -r -d '' entry; do
+            f="${entry:3}"
+            git add -- "$f"
+            sz=$(stat -c%s -- "$f" 2>/dev/null || echo 0)
+            total=$((total + sz)); n=$((n + 1))
+            if [ "$total" -gt "$MAX_BATCH_BYTES" ] || [ "$n" -ge 40 ]; then
+              if ! git diff --cached --quiet; then
+                git commit -m "آرشیو: افزودن $n فایل (بسته $batch) [skip ci]"
+                for i in 1 2 3; do
+                  if git push; then break; fi
+                  echo "پوش شکست خورد (تلاش $i) — ۳۰ ثانیه صبر و تلاش مجدد..."
+                  sleep 30
+                done
+              fi
+              total=0; n=0; batch=$((batch + 1))
+            fi
+          done < <(git status --porcelain=v1 -z -uall -- archive)
+
+          # باقیمانده
+          if ! git diff --cached --quiet; then
+            git commit -m "آرشیو: افزودن $n فایل (بسته $batch) [skip ci]"
+          fi
+          for i in 1 2 3; do
+            if git push; then break; fi
+            echo "پوش شکست خورد (تلاش $i) — ۳۰ ثانیه صبر و تلاش مجدد..."
+            sleep 30
+          done
+          echo "تمام شد."
