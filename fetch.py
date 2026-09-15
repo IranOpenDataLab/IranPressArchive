@@ -1,31 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران
+fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نسخه ۳)
 
-پشتیبانی از چهار نوع ساختار لینک (تعریف در urls.yml):
-  google_drive_folder / google_drive_file / index_page / direct_files
+پشتیبانی از پنج نوع ساختار لینک (تعریف در urls.yml):
+  google_drive_folder / google_drive_file / index_page / url_sequence / direct_files
 
 جریان کار:
   1) دانلود فایل‌های جدید به archive/<id>/
   2) ثبت همه فایل‌ها در data/manifest.json (نام، تاریخ، اندازه، sha256، منبع)
   3) بازسازی خودکار بخش فهرست دانلود در README.md
 
+ویژگی‌های تاب‌آوری:
+  - خطای یک فایل، دانلود بقیه را متوقف نمی‌کند (رفتن به لینک بعدی)
+  - خطای یک منبع، منابع بعدی را متوقف نمی‌کند
+  - تلاش مجدد خودکار (۳ بار) برای خطاهای شبکه/سرور؛ 404 فقط ثبت می‌شود
+  - رعایت محدودیت حجم فایل گیت‌هاب (پیش‌فرض ۹۰ مگابایت)
+  - چاپ کامل traceback هر خطا برای عیب‌یابی در لاگ Workflow
+
 نمونه اجرا:
   python fetch.py                      # همه منابع + بازسازی فهرست
   python fetch.py --source neshat     # فقط یک منبع
   python fetch.py --dry-run           # فقط گزارش، بدون دانلود
-  python fetch.py --commit            # بعد از دانلود، کامیت و پوش git
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
+import time
+import traceback
+from datetime import datetime, timezone
 from html.parser import HTMLParser
+from urllib.error import HTTPError
 from urllib.parse import urljoin, urlparse, unquote
 from urllib.request import Request, urlopen
 
@@ -34,14 +44,14 @@ try:
 except ImportError:
     sys.exit("PyYAML نصب نیست: pip install pyyaml")
 
-from make_index import scan_and_register, rebuild_index, save_manifest
+from make_index import sha256_of, scan_and_register, rebuild_index, save_manifest, load_manifest
 
-USER_AGENT = "IranPressArchiveFetcher/2.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
+USER_AGENT = "IranPressArchiveFetcher/3.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
 DEFAULT_EXTENSIONS = [".pdf"]
 MANIFEST_PATH = "data/manifest.json"
+MAX_FILE_MB_DEFAULT = 90          # سقف امن فایل برای گیت (هاردلیمیت گیت‌هاب ۱۰۰MB)
+RETRIES = 3
 
-
-# ---------- کانفیگ ----------
 
 def load_config(path):
     with open(path, encoding="utf-8") as f:
@@ -53,7 +63,7 @@ def load_config(path):
 
 # ---------- ابزارهای شبکه ----------
 
-def http_get(url, timeout=60):
+def http_get(url, timeout=120):
     req = Request(url, headers={"User-Agent": USER_AGENT})
     return urlopen(req, timeout=timeout)
 
@@ -61,6 +71,50 @@ def http_get(url, timeout=60):
 def safe_filename(name):
     name = unquote(name).strip() or "file"
     return re.sub(r'[\\/:*?"<>|]', "_", name)
+
+
+def download_file(url, dest, max_bytes):
+    """دانلود با تلاش مجدد و سقف حجم.
+    خروجی: (status, info) که status یکی از
+    downloaded / missing / too-large / error است."""
+    last_err = None
+    for attempt in range(1, RETRIES + 1):
+        tmp = dest + ".part"
+        try:
+            with http_get(url) as r:
+                cl = r.headers.get("Content-Length")
+                if cl and int(cl) > max_bytes:
+                    return "too-large", f"{int(cl)/1e6:.1f}MB"
+                written = 0
+                with open(tmp, "wb") as f:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > max_bytes:
+                            break
+                        f.write(chunk)
+                if written > max_bytes:
+                    os.remove(tmp)
+                    return "too-large", f"{written/1e6:.1f}MB"
+            os.replace(tmp, dest)
+            return "downloaded", written
+        except HTTPError as e:
+            if e.code in (404, 410):
+                return "missing", e.code
+            last_err = e
+        except Exception as e:
+            last_err = e
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        if attempt < RETRIES:
+            wait = 5 * attempt
+            print(f"  [تلاش {attempt}/{RETRIES} شکست خورد: {last_err} | {wait}s صبر...]")
+            time.sleep(wait)
+    print(f"  [خطای کامل] {url}:")
+    traceback.print_exc()
+    return "error", str(last_err)
 
 
 # ---------- خزنده صفحات ایندکس ----------
@@ -106,34 +160,46 @@ def crawl_index(base_url, extensions, recursive=True, max_depth=3, _depth=0, _se
     return files
 
 
-# ---------- دانلود ----------
-
-def download_file(url, dest_dir, seen_urls):
-    if url in seen_urls:
-        return "skipped"
-    os.makedirs(dest_dir, exist_ok=True)
-    name = safe_filename(os.path.basename(urlparse(url).path))
-    dest = os.path.join(dest_dir, name)
-    if os.path.exists(dest):
-        seen_urls.add(url)
-        return "skipped"
-    tmp = dest + ".part"
-    with http_get(url) as r, open(tmp, "wb") as f:
-        shutil.copyfileobj(r, f)
-    os.replace(tmp, dest)
-    seen_urls.add(url)
-    return "downloaded"
-
+# ---------- گوگل‌درایو ----------
 
 def gdown_available():
     return subprocess.run(["gdown", "--version"], capture_output=True).returncode == 0
 
 
 def fetch_drive_folder(url, dest_dir):
+    """خروجی gdown مستقیم به لاگ می‌رود تا خطاها کامل دیده شوند."""
     cmd = ["gdown", "--folder", url, "-O", dest_dir, "--no-cookies", "--remaining-ok"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd)
     if res.returncode != 0:
-        raise RuntimeError("gdown خطا داد:\n" + res.stderr[-2000:])
+        raise RuntimeError(f"gdown با کد {res.returncode} شکست خورد (لاگ بالا)")
+
+
+def enforce_size_limit(dest_dir, max_bytes):
+    """فایل‌های بزرگ‌تر از سقف گیت را حذف می‌کند تا پوش نرم شکسته نشود."""
+    for root, _, fnames in os.walk(dest_dir):
+        for fn in fnames:
+            p = os.path.join(root, fn)
+            if os.path.getsize(p) > max_bytes:
+                print(f"  [حذف — بزرگ‌تر از سقف {max_bytes//1000000}MB] {p}")
+                os.remove(p)
+
+
+# ---------- ثبت در منیفست ----------
+
+def register_file(src_state, rel_path, full_path, url=None, date_display=None, date_iso=None, extra=None):
+    entry = {
+        "filename": os.path.basename(rel_path),
+        "date_display": date_display,
+        "date_iso": date_iso,
+        "size": os.path.getsize(full_path),
+        "sha256": sha256_of(full_path),
+        "first_seen": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    if url:
+        entry["url"] = url
+    if extra:
+        entry.update(extra)
+    src_state["files"][rel_path] = entry
 
 
 # ---------- پردازش هر منبع ----------
@@ -142,77 +208,123 @@ def process_source(src, args, manifest):
     sid = src.get("id") or src["name"]
     stype = src["type"]
     dest_dir = os.path.join("archive", sid)
+    max_bytes = int(src.get("max_file_mb", MAX_FILE_MB_DEFAULT)) * 1000000
     src_state = manifest["sources"].setdefault(sid, {"name": src["name"], "files": {}, "seen_urls": []})
+    files = src_state.setdefault("files", {})
     seen_urls = set(src_state.get("seen_urls", []))
     print(f"\n=== {src['name']} ({sid}) | نوع: {stype} ===")
 
+    # --- پوشه گوگل‌درایو ---
     if stype == "google_drive_folder":
         if args.dry_run:
             print("[dry-run] پوشه درایو با gdown همگام می‌شود.")
-            return 0
+            return
         if not gdown_available():
             raise RuntimeError("gdown نصب نیست: pip install gdown")
         os.makedirs(dest_dir, exist_ok=True)
         fetch_drive_folder(src["url"], dest_dir)
+        enforce_size_limit(dest_dir, max_bytes)
 
+    # --- فایل تکی درایو ---
     elif stype == "google_drive_file":
-        if not args.dry_run:
-            if not gdown_available():
-                raise RuntimeError("gdown نصب نیست: pip install gdown")
-            os.makedirs(dest_dir, exist_ok=True)
-            cmd = ["gdown", src["url"], "-O", dest_dir + "/", "--no-cookies", "--fuzzy"]
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            if res.returncode != 0:
-                raise RuntimeError("gdown خطا داد:\n" + res.stderr[-2000:])
+        if args.dry_run:
+            print(f"[dry-run] فایل درایو: {src['url']}")
+            return
+        if not gdown_available():
+            raise RuntimeError("gdown نصب نیست: pip install gdown")
+        os.makedirs(dest_dir, exist_ok=True)
+        res = subprocess.run(["gdown", src["url"], "-O", dest_dir + "/", "--no-cookies", "--fuzzy"])
+        if res.returncode != 0:
+            raise RuntimeError(f"gdown با کد {res.returncode} شکست خورد (لاگ بالا)")
+        enforce_size_limit(dest_dir, max_bytes)
 
+    # --- دنباله ترتیبی URL (مثل نشاط: /dl/neshat/1377/1.pdf) ---
+    elif stype == "url_sequence":
+        tmpl = src["url_template"]
+        name_tmpl = src.get("filename_template", f"{sid}_{{year}}_{{issue:03d}}.pdf")
+        delay = float(src.get("delay_seconds", 1))
+        counts = {"downloaded": 0, "missing": 0, "error": 0, "too-large": 0, "skipped": 0}
+        for seq in src.get("sequences", []):
+            year, start, end = seq["year"], seq["start"], seq["end"]
+            print(f"— سال {year}: شماره {start} تا {end}")
+            for issue in range(start, end + 1):
+                url = tmpl.format(year=year, issue=issue)
+                fname = name_tmpl.format(year=year, issue=issue)
+                rel = f"{sid}/{fname}"
+                if rel in files and os.path.exists(os.path.join("archive", rel)):
+                    counts["skipped"] += 1
+                    continue
+                if args.dry_run:
+                    print(f"  [would-download] {url}")
+                    continue
+                os.makedirs(dest_dir, exist_ok=True)
+                status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
+                if status == "downloaded":
+                    register_file(
+                        src_state, rel, os.path.join(dest_dir, fname), url=url,
+                        date_display=f"سال {year} — شماره {issue}",
+                        date_iso=f"{year:04d}-{issue:06d}",
+                        extra={"year": year, "issue": issue},
+                    )
+                    counts["downloaded"] += 1
+                    print(f"  [ok] {fname} ({info/1e6:.1f}MB)")
+                else:
+                    counts[status] = counts.get(status, 0) + 1
+                    print(f"  [{status}] {url} | {info}")
+                if delay:
+                    time.sleep(delay)
+        print(f"خلاصه {sid}: {counts}")
+        src_state["seen_urls"] = sorted(seen_urls)
+        return
+
+    # --- صفحه ایندکس ---
     elif stype == "index_page":
         exts = [e.lower() for e in src.get("extensions", DEFAULT_EXTENSIONS)]
         links = crawl_index(src["url"], exts, src.get("recursive", True))
         print(f"{len(links)} فایل در صفحه یافت شد.")
-        n_new = 0
+        delay = float(src.get("delay_seconds", 1))
         for link in links:
             if args.dry_run:
                 status = "skipped" if link in seen_urls else "would-download"
                 print(f"  [{status}] {os.path.basename(unquote(link))}")
                 continue
-            try:
-                status = download_file(link, dest_dir, seen_urls)
+            if link in seen_urls:
+                continue
+            fname = safe_filename(os.path.basename(urlparse(link).path))
+            rel = f"{sid}/{fname}"
+            if rel not in files:
+                status, info = download_file(link, os.path.join(dest_dir, fname), max_bytes)
                 if status == "downloaded":
-                    n_new += 1
-                print(f"  [{status}] {os.path.basename(unquote(link))}")
-            except Exception as e:
-                print(f"  [خطا] {link}: {e}")
+                    register_file(src_state, rel, os.path.join(dest_dir, fname), url=link)
+                    print(f"  [ok] {fname}")
+                else:
+                    print(f"  [{status}] {link} | {info}")
+            seen_urls.add(link)
+            if delay:
+                time.sleep(delay)
         src_state["seen_urls"] = sorted(seen_urls)
-        return n_new
 
+    # --- فهرست مستقیم ---
     elif stype == "direct_files":
-        n_new = 0
         for url in src.get("files", []):
             if args.dry_run:
                 print(f"  [would-download] {url}")
                 continue
-            try:
-                if download_file(url, dest_dir, seen_urls) == "downloaded":
-                    n_new += 1
-            except Exception as e:
-                print(f"  [خطا] {url}: {e}")
-        src_state["seen_urls"] = sorted(seen_urls)
-        return n_new
+            if url in seen_urls:
+                continue
+            fname = safe_filename(os.path.basename(urlparse(url).path))
+            rel = f"{sid}/{fname}"
+            if rel not in files:
+                status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
+                if status == "downloaded":
+                    register_file(src_state, rel, os.path.join(dest_dir, fname), url=url)
+                    print(f"  [ok] {fname}")
+                else:
+                    print(f"  [{status}] {url} | {info}")
+            seen_urls.add(url)
 
     else:
         raise ValueError(f"نوع منبع پشتیبانی نمی‌شود: {stype}")
-    return None
-
-
-def git_commit(n_new):
-    if n_new <= 0:
-        print("فایل جدیدی برای کامیت نیست.")
-        return
-    subprocess.run(["git", "add", "archive", MANIFEST_PATH, "README.md"], check=True)
-    msg = f"آرشیو: افزودن {n_new} فایل جدید"
-    subprocess.run(["git", "commit", "-m", msg], check=True)
-    subprocess.run(["git", "push"], check=True)
-    print(f"کامیت و پوش انجام شد: {msg}")
 
 
 def main():
@@ -220,7 +332,6 @@ def main():
     ap.add_argument("--config", default="urls.yml")
     ap.add_argument("--source", help="اجرای فقط یک منبع (id)")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--commit", action="store_true", help="بعد از دانلود، تغییرات را کامیت و پوش کن")
     args = ap.parse_args()
 
     sources = load_config(args.config)
@@ -229,32 +340,27 @@ def main():
         if not sources:
             sys.exit(f"منبعی با id برابر {args.source} یافت نشد.")
 
-    manifest = None
-    if not args.dry_run:
-        from make_index import load_manifest
-        manifest = load_manifest()
-
-    any_ok = False
+    manifest = load_manifest()
+    any_ok, had_error = False, False
     for src in sources:
         sid = src.get("id") or src["name"]
         try:
-            if args.dry_run:
-                process_source(src, args, {"sources": {}})
-            else:
-                process_source(src, args, manifest)
+            process_source(src, args, manifest)
             any_ok = True
-        except Exception as e:
-            print(f"!!! منبع {sid} شکست خورد: {e}")
+        except Exception:
+            had_error = True
+            print(f"!!! منبع {sid} شکست خورد — خطای کامل:")
+            traceback.print_exc()
+            print("→ ادامه با منبع بعدی...")
 
     if not args.dry_run:
         n_new = scan_and_register(manifest)
         save_manifest(manifest)
         rebuild_index(manifest)
         print(f"\nفایل‌های تازه ثبت‌شده در منیفست: {n_new}")
-        if args.commit:
-            git_commit(n_new)
 
-    sys.exit(0 if any_ok else 1)
+    print("\n===== پایان اجرا =====")
+    sys.exit(2 if had_error else (0 if any_ok else 1))
 
 
 if __name__ == "__main__":

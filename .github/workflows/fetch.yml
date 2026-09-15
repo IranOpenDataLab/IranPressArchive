@@ -1,0 +1,65 @@
+# اجرای دستی واکشی آرشیو — از تب Actions با دکمه Run workflow
+name: Fetch Archive
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "شناسه منبع (خالی = همه منابع)"
+        required: false
+        default: ""
+      dry_run:
+        description: "فقط گزارش، بدون دانلود"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-archive
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fetcher (full logs, unbuffered)
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.source }}" ]; then
+            ARGS="--source ${{ inputs.source }}"
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python -u fetch.py $ARGS
+
+      - name: Commit and push new files
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "dry-run: کامیت انجام نمی‌شود."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add archive data README.md
+          if git diff --cached --quiet; then
+            echo "فایل جدیدی برای کامیت نیست."
+          else
+            git commit -m "آرشیو: افزودن فایل‌های جدید [skip ci]"
+            git push
+          fi

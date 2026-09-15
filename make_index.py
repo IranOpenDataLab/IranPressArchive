@@ -5,15 +5,11 @@ make_index.py — سازنده فهرست دانلود آرشیو
 
 دو کار انجام می‌دهد:
   1) scan_and_register(manifest): همه فایل‌های archive/ را اسکن می‌کند و
-     فایل‌های جدید را با متادیتا (نام، تاریخ استخراج‌شده از نام فایل،
-     اندازه، sha256) در data/manifest.json ثبت می‌کند.
+     فایل‌های جدید را با متادیتا (نام، تاریخ، اندازه، sha256) در data/manifest.json ثبت می‌کند.
   2) rebuild_index(manifest): بخش «فهرست نشریات» README.md را بین
      نشانگرهای AUTO-INDEX بازسازی می‌کند.
 
 اجراهای مجدد امن (idempotent) هستند و دست‌نویس‌های README را حفظ می‌کنند.
-
-اجرای مستقل:
-  python make_index.py     # فقط اسکن + بازسازی فهرست (بدون دانلود)
 """
 
 import hashlib
@@ -27,7 +23,6 @@ MARK_START = "<!-- AUTO-INDEX:START -->"
 MARK_END = "<!-- AUTO-INDEX:END -->"
 MANIFEST_PATH = "data/manifest.json"
 
-# ---------- تبدیل تاریخ جلالی به میلادی (الگوریتم استاندارد) ----------
 
 def _is_gregorian_leap(y):
     return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
@@ -62,8 +57,6 @@ def jalali_to_gregorian(jy, jm, jd):
     return gy, gm + 1, gd
 
 
-# ---------- استخراج تاریخ از نام فایل ----------
-
 RE_JALALI = re.compile(r"(?<!\d)(1[34]\d{2})[-_./ ]?([0-1]?\d)[-_./ ]?([0-3]?\d)(?!\d)")
 RE_GREGORIAN = re.compile(r"(?<!\d)((?:19|20)\d{2})[-_./ ]?([0-1]?\d)[-_./ ]?([0-3]?\d)(?!\d)")
 RE_JALALI_COMPACT = re.compile(r"(?<!\d)(1[34]\d{2})([0-1]\d)([0-3]\d)(?!\d)")
@@ -75,8 +68,6 @@ def _valid_jalali(y, m, d):
 
 
 def extract_date(text, custom_regex=None):
-    """تاریخ را از نام فایل استخراج می‌کند؛ خروجی:
-    (نمایش، تاریخ میلادی ISO برای مرتب‌سازی) یا (None, None)"""
     if custom_regex:
         m = re.search(custom_regex, text)
         if m:
@@ -97,8 +88,6 @@ def extract_date(text, custom_regex=None):
                 return f"{y:04d}/{mo:02d}/{d:02d}", f"{y:04d}-{mo:02d}-{d:02d}"
     return None, None
 
-
-# ---------- اسکن و ثبت فایل‌ها ----------
 
 def sha256_of(path):
     h = hashlib.sha256()
@@ -122,8 +111,6 @@ def save_manifest(m, path=MANIFEST_PATH):
 
 
 def scan_and_register(manifest):
-    """فایل‌های archive/ را اسکن و فایل‌های جدید را در منیفست ثبت می‌کند.
-    تعداد فایل‌های تازه ثبت‌شده را برمی‌گرداند."""
     n_new = 0
     if not os.path.isdir("archive"):
         return 0
@@ -155,8 +142,6 @@ def scan_and_register(manifest):
     return n_new
 
 
-# ---------- ساخت فهرست README ----------
-
 def _row(entry_rel, meta):
     disp = meta.get("date_display") or "—"
     link = f"[دانلود](archive/{entry_rel})"
@@ -187,7 +172,6 @@ def render_index(manifest):
 
 
 def rebuild_index(manifest, readme_path=README_PATH):
-    """بخش بین نشانگرها را در README بازسازی می‌کند."""
     body = render_index(manifest).strip()
     section = f"{MARK_START}\n{body}\n{MARK_END}"
     if not os.path.exists(readme_path):

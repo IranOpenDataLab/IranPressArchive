@@ -5,20 +5,27 @@
 #
 #    name       (الزامی) نام فارسی منبع — در فهرست README نمایش داده می‌شود
 #    id         (الزامی) شناسه انگلیسی یکتا — نام زیرپوشه archive/<id>/ هم می‌شود
-#    type       (الزامی) یکی از چهار نوع پشتیبانی‌شده:
+#    type       (الزامی) یکی از پنج نوع پشتیبانی‌شده:
 #                 google_drive_folder : پوشه عمومی گوگل‌درایو
 #                 google_drive_file   : فایل تکی گوگل‌درایو
 #                 index_page          : صفحه فهرست لینک فایل‌ها (مثل Apache index)
+#                 url_sequence        : دنباله ترتیبی شماره‌ها (مثل نشاط)
 #                 direct_files        : فهرست دستی URL مستقیم فایل‌ها
-#    url        (الزامی برای سه نوع اول)
-#    files      (الزامی برای direct_files) فهرست URLها
+#    url        (الزامی برای انواع drive و index_page)
 #
-#  کلیدهای اختیاری:
-#    date_regex : اگر الگوی تاریخ در نام فایل‌های این منبع خاص است،
-#                 یک regex با سه گروه (سال، ماه، روز) بدهید؛ در غیر این
-#                 صورت تشخیص خودکار (جلالی/میلادی، با جداکننده یا فشرده) انجام می‌شود.
-#    extensions : (index_page) پسوندهای موردنظر؛ پیش‌فرض [".pdf"]
-#    recursive  : (index_page) خزش در زیرپوشه‌ها؛ پیش‌فرض true
+#  کلیدهای مشترک اختیاری:
+#    max_file_mb      : سقف حجم هر فایل (پیش‌فرض ۹۰ مگابایت — هاردلیمیت گیت‌هاب ۱۰۰)
+#    delay_seconds    : مکث بین دانلودها (پیش‌فرض ۱ ثانیه)
+#    date_regex       : regex اختصاصی تاریخ با سه گروه (سال، ماه، روز)
+#
+#  کلیدهای url_sequence:
+#    url_template     : الگوی URL با {year} و {issue}
+#    filename_template: نام فایل ذخیره‌شده (پیش‌فرض: <id>_<year>_<issue>.pdf)
+#    sequences        : فهرست بازه‌ها؛ هرکدام: year / start / end
+#
+#  کلیدهای index_page:
+#    extensions       : پسوندها؛ پیش‌فرض [".pdf"]
+#    recursive        : خزش در زیرپوشه‌ها؛ پیش‌فرض true
 # ============================================================
 
 sources:
@@ -39,10 +46,15 @@ sources:
 
   - name: نشاط
     id: neshat
-    type: index_page
-    url: "https://jalaeipour.com/NESHAT/"
-    extensions: [".pdf"]
-    recursive: true
+    type: url_sequence
+    url_template: "https://jalaeipour.com/dl/neshat/{year}/{issue}.pdf"
+    sequences:
+      - year: 1377
+        start: 1
+        end: 24
+      - year: 1378
+        start: 25
+        end: 148
 
 # ---------- نمونه برای پروژه‌های بعدی ----------
 #
@@ -51,12 +63,22 @@ sources:
 #    type: google_drive_file
 #    url: "https://drive.google.com/file/d/FILE_ID/view"
 #
+#  - name: نمونه دنباله ترتیبی
+#    id: sample-seq
+#    type: url_sequence
+#    url_template: "https://example.org/issues/{year}/{issue}.pdf"
+#    sequences:
+#      - year: 1380
+#        start: 1
+#        end: 350
+#    delay_seconds: 2
+#    max_file_mb: 50
+#
 #  - name: نمونه فهرست دستی
 #    id: sample-direct
 #    type: direct_files
 #    files:
 #      - "https://example.org/docs/a.pdf"
-#      - "https://example.org/docs/b.pdf"
 #
 #  - name: نمونه با الگوی تاریخ اختصاصی
 #    id: sample-custom-date
