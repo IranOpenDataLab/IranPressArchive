@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نسخه ۳)
+fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نسخه ۴)
 
 پشتیبانی از پنج نوع ساختار لینک (تعریف در urls.yml):
   google_drive_folder / google_drive_file / index_page / url_sequence / direct_files
@@ -15,7 +15,8 @@ fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نس�
   - خطای یک فایل، دانلود بقیه را متوقف نمی‌کند (رفتن به لینک بعدی)
   - خطای یک منبع، منابع بعدی را متوقف نمی‌کند
   - تلاش مجدد خودکار (۳ بار) برای خطاهای شبکه/سرور؛ 404 فقط ثبت می‌شود
-  - رعایت محدودیت حجم فایل گیت‌هاب (پیش‌فرض ۹۰ مگابایت)
+  - فایل موجود روی دیسک هرگز دوباره دانلود نمی‌شود
+  - سقف حجم هر فایل دقیقا ۱۰۰ مگابایت (۱۰۰ MiB — هاردلیمیت گیت‌هاب)
   - چاپ کامل traceback هر خطا برای عیب‌یابی در لاگ Workflow
 
 نمونه اجرا:
@@ -25,8 +26,6 @@ fetch.py — واکشگر آرشیو اسناد/مطبوعات ایران (نس�
 """
 
 import argparse
-import hashlib
-import json
 import os
 import re
 import subprocess
@@ -46,10 +45,10 @@ except ImportError:
 
 from make_index import sha256_of, scan_and_register, rebuild_index, save_manifest, load_manifest
 
-USER_AGENT = "IranPressArchiveFetcher/3.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
+USER_AGENT = "IranPressArchiveFetcher/4.0 (+https://github.com/IranOpenDataLab/IranPressArchive)"
 DEFAULT_EXTENSIONS = [".pdf"]
 MANIFEST_PATH = "data/manifest.json"
-MAX_FILE_MB_DEFAULT = 90          # سقف امن فایل برای گیت (هاردلیمیت گیت‌هاب ۱۰۰MB)
+MAX_FILE_MB_DEFAULT = 100         # دقیقا هاردلیمیت گیت‌هاب (۱۰۰ MiB)
 RETRIES = 3
 
 
@@ -76,7 +75,11 @@ def safe_filename(name):
 def download_file(url, dest, max_bytes):
     """دانلود با تلاش مجدد و سقف حجم.
     خروجی: (status, info) که status یکی از
-    downloaded / missing / too-large / error است."""
+    downloaded / exists / missing / too-large / error است.
+    اگر فایل مقصد از قبل روی دیسک باشد، هیچ درخواست شبکه‌ای زده نمی‌شود."""
+    if os.path.exists(dest) and os.path.getsize(dest) > 0:
+        return "exists", os.path.getsize(dest)
+
     last_err = None
     for attempt in range(1, RETRIES + 1):
         tmp = dest + ".part"
@@ -167,8 +170,10 @@ def gdown_available():
 
 
 def fetch_drive_folder(url, dest_dir):
-    """خروجی gdown مستقیم به لاگ می‌رود تا خطاها کامل دیده شوند."""
-    cmd = ["gdown", "--folder", url, "-O", dest_dir, "--no-cookies", "--remaining-ok"]
+    """خروجی gdown مستقیم به لاگ می‌رود تا خطاها کامل دیده شوند.
+    گزینه --continue باعث می‌شود فایل کامل موجود دوباره گرفته نشود و
+    دانلود نیمه‌تمام از سر گرفته شود."""
+    cmd = ["gdown", "--folder", url, "-O", dest_dir, "--no-cookies", "--remaining-ok", "--continue"]
     res = subprocess.run(cmd)
     if res.returncode != 0:
         raise RuntimeError(f"gdown با کد {res.returncode} شکست خورد (لاگ بالا)")
@@ -180,7 +185,7 @@ def enforce_size_limit(dest_dir, max_bytes):
         for fn in fnames:
             p = os.path.join(root, fn)
             if os.path.getsize(p) > max_bytes:
-                print(f"  [حذف — بزرگ‌تر از سقف {max_bytes//1000000}MB] {p}")
+                print(f"  [حذف — بزرگ‌تر از سقف {max_bytes//1048576}MiB] {p}")
                 os.remove(p)
 
 
@@ -208,7 +213,7 @@ def process_source(src, args, manifest):
     sid = src.get("id") or src["name"]
     stype = src["type"]
     dest_dir = os.path.join("archive", sid)
-    max_bytes = int(src.get("max_file_mb", MAX_FILE_MB_DEFAULT)) * 1000000
+    max_bytes = int(src.get("max_file_mb", MAX_FILE_MB_DEFAULT)) * 1024 * 1024  # MiB
     src_state = manifest["sources"].setdefault(sid, {"name": src["name"], "files": {}, "seen_urls": []})
     files = src_state.setdefault("files", {})
     seen_urls = set(src_state.get("seen_urls", []))
@@ -233,7 +238,7 @@ def process_source(src, args, manifest):
         if not gdown_available():
             raise RuntimeError("gdown نصب نیست: pip install gdown")
         os.makedirs(dest_dir, exist_ok=True)
-        res = subprocess.run(["gdown", src["url"], "-O", dest_dir + "/", "--no-cookies", "--fuzzy"])
+        res = subprocess.run(["gdown", src["url"], "-O", dest_dir + "/", "--no-cookies", "--fuzzy", "--continue"])
         if res.returncode != 0:
             raise RuntimeError(f"gdown با کد {res.returncode} شکست خورد (لاگ بالا)")
         enforce_size_limit(dest_dir, max_bytes)
@@ -251,11 +256,12 @@ def process_source(src, args, manifest):
                 url = tmpl.format(year=year, issue=issue)
                 fname = name_tmpl.format(year=year, issue=issue)
                 rel = f"{sid}/{fname}"
-                if rel in files and os.path.exists(os.path.join("archive", rel)):
-                    counts["skipped"] += 1
-                    continue
                 if args.dry_run:
-                    print(f"  [would-download] {url}")
+                    if rel in files or os.path.exists(os.path.join("archive", rel)):
+                        status = "exists"
+                    else:
+                        status = "would-download"
+                    print(f"  [{status}] {url}")
                     continue
                 os.makedirs(dest_dir, exist_ok=True)
                 status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
@@ -268,6 +274,8 @@ def process_source(src, args, manifest):
                     )
                     counts["downloaded"] += 1
                     print(f"  [ok] {fname} ({info/1e6:.1f}MB)")
+                elif status == "exists":
+                    counts["skipped"] += 1
                 else:
                     counts[status] = counts.get(status, 0) + 1
                     print(f"  [{status}] {url} | {info}")
@@ -292,13 +300,16 @@ def process_source(src, args, manifest):
                 continue
             fname = safe_filename(os.path.basename(urlparse(link).path))
             rel = f"{sid}/{fname}"
-            if rel not in files:
-                status, info = download_file(link, os.path.join(dest_dir, fname), max_bytes)
-                if status == "downloaded":
+            status, info = download_file(link, os.path.join(dest_dir, fname), max_bytes)
+            if status == "downloaded":
+                register_file(src_state, rel, os.path.join(dest_dir, fname), url=link)
+                print(f"  [ok] {fname}")
+            elif status == "exists":
+                if rel not in files:
                     register_file(src_state, rel, os.path.join(dest_dir, fname), url=link)
-                    print(f"  [ok] {fname}")
-                else:
-                    print(f"  [{status}] {link} | {info}")
+                print(f"  [exists] {fname}")
+            else:
+                print(f"  [{status}] {link} | {info}")
             seen_urls.add(link)
             if delay:
                 time.sleep(delay)
@@ -314,13 +325,16 @@ def process_source(src, args, manifest):
                 continue
             fname = safe_filename(os.path.basename(urlparse(url).path))
             rel = f"{sid}/{fname}"
-            if rel not in files:
-                status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
-                if status == "downloaded":
+            status, info = download_file(url, os.path.join(dest_dir, fname), max_bytes)
+            if status == "downloaded":
+                register_file(src_state, rel, os.path.join(dest_dir, fname), url=url)
+                print(f"  [ok] {fname}")
+            elif status == "exists":
+                if rel not in files:
                     register_file(src_state, rel, os.path.join(dest_dir, fname), url=url)
-                    print(f"  [ok] {fname}")
-                else:
-                    print(f"  [{status}] {url} | {info}")
+                print(f"  [exists] {fname}")
+            else:
+                print(f"  [{status}] {url} | {info}")
             seen_urls.add(url)
 
     else:
